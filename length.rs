@@ -2,7 +2,6 @@ use std::fmt::{self, Debug, Display, Formatter};
 use std::iter::Sum;
 use std::ops::*;
 use std::str::FromStr;
-use super::{EPS, ApproxEq};
 
 /// The base type for all distances and sizes in space.
 #[derive(Default, Copy, Clone, PartialEq, PartialOrd)]
@@ -17,15 +16,12 @@ impl Length {
 
     /// The infinite length.
     ///
-    /// This may no really make sense to have, but it's useful for initializing
-    /// values.
+    /// This may not make much sense conceptually, but it's nonetheless useful
+    /// for initializing values which depend on comparisons.
     pub const INF: Length = Length { pt: f32::INFINITY };
 
     /// The negative infinite length.
     pub const NEG_INF: Length = Length { pt: f32::NEG_INFINITY };
-
-    /// An epsilon length for floating point calculations.
-    pub const EPS: Length = Length { pt: EPS };
 
     /// Create a length from an amount of points.
     pub const fn pt(pt: f32) -> Length {
@@ -93,11 +89,7 @@ pub fn pt(pt: f32) -> Length {
     Length { pt }
 }
 
-impl ApproxEq for Length {
-    fn approx_eq(&self, other: &Self) -> bool {
-        (self.pt - other.pt).abs() < Self::EPS.pt
-    }
-}
+impl_approx_eq!(Length [pt]);
 
 impl Add for Length {
     type Output = Self;

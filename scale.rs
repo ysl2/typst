@@ -15,6 +15,7 @@ pub enum Scale<T> {
 impl<T> Scale<T> where T: Mul<f32, Output=T> {
     /// Returns either the absolute value or computes the relative value as a
     /// fraction of `one`.
+    ///
     /// # Example
     /// ```
     /// # use layr::{assert_approx_eq, geom::{Length, Scale}};
@@ -32,10 +33,10 @@ impl<T> Scale<T> where T: Mul<f32, Output=T> {
 }
 
 impl<T> ApproxEq for Scale<T> where T: ApproxEq {
-    fn approx_eq(&self, other: &Self) -> bool {
+    fn approx_eq(&self, other: &Self, tolerance: f32) -> bool {
         match (self, other) {
-            (Scale::Abs(x), Scale::Abs(y)) => x.approx_eq(y),
-            (Scale::Rel(x), Scale::Rel(y)) => x.approx_eq(y),
+            (Scale::Abs(x), Scale::Abs(y)) => x.approx_eq(y, tolerance),
+            (Scale::Rel(x), Scale::Rel(y)) => x.approx_eq(y, tolerance),
             _ => false,
         }
     }

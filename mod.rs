@@ -12,7 +12,7 @@ mod vec;
 
 use std::cmp::Ordering;
 
-pub use approx::{EPS, ApproxEq};
+pub use approx::ApproxEq;
 pub use length::{pt, Length, ParseLengthError, FlexLength};
 pub use point::Point;
 pub use range::{Range, RangeKey, Region};
