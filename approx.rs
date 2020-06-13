@@ -70,30 +70,30 @@ macro_rules! impl_approx_eq {
 /// ```
 #[macro_export]
 macro_rules! assert_approx_eq {
-    ($left:expr, $right:expr, tolerance = $t:expr $(,)?) => {
-        let (left, right) = ($left, $right);
-        if !$crate::geom::ApproxEq::approx_eq(&left, &right, $t) {
+    ($left:expr, $right:expr, tolerance = $t:expr $(,)?) => {{
+        let (left, right) = (&$left, &$right);
+        if !$crate::geom::ApproxEq::approx_eq(left, right, $t) {
             panic!(
                 "approximate assertion failed:\n  left: `{:?}`,\n right: `{:?}`",
                 left, right,
             );
         }
-    };
+    }};
 
     ($left:expr, $right:expr $(,)?) => {
         assert_approx_eq!($left, $right, tolerance = 1e-5);
     };
 
-    ($left:expr, $right:expr, tolerance = $t:expr, $($arg:tt)+) => {
-        let (left, right) = ($left, $right);
-        if !$crate::geom::ApproxEq::approx_eq(&left, &right, $t) {
+    ($left:expr, $right:expr, tolerance = $t:expr, $($arg:tt)+) => {{
+        let (left, right) = (&$left, &$right);
+        if !$crate::geom::ApproxEq::approx_eq(left, right, $t) {
             panic!(
                 "approximate assertion failed:\n  left: `{:?}`,\n right: `{:?}`: {}",
                 left, right,
                 format_args!($($arg)+),
             );
         }
-    };
+    }};
 
     ($left:expr, $right:expr, $($arg:tt)+) => {
         assert_approx_eq!($left, $right, tolerance = 1e-5, $($arg)+);

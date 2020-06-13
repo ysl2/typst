@@ -1,4 +1,4 @@
-use std::fmt::{self, Debug, Display, Formatter};
+use std::fmt;
 use std::iter::Sum;
 use std::ops::*;
 use std::str::FromStr;
@@ -179,14 +179,14 @@ impl Sum for Length {
     }
 }
 
-impl Debug for Length {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        Display::fmt(self, f)
+impl fmt::Debug for Length {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
     }
 }
 
-impl Display for Length {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl fmt::Display for Length {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}pt", self.pt)
     }
 }
@@ -210,14 +210,14 @@ impl FromStr for Length {
     }
 }
 
-/// An error which can be returned when parsing a length.
+/// An error that can occur when parsing a length from a string.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct ParseLengthError;
 
 impl std::error::Error for ParseLengthError {}
 
-impl Display for ParseLengthError {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl fmt::Display for ParseLengthError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.pad("invalid string for length")
     }
 }
@@ -314,8 +314,8 @@ impl SubAssign for FlexLength {
     }
 }
 
-impl Debug for FlexLength {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl fmt::Debug for FlexLength {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "({},{},{})", self.base, self.shrink, self.stretch)
     }
 }

@@ -2,22 +2,24 @@
 
 #[macro_use]
 mod approx;
+mod bez;
 mod length;
 mod point;
 mod range;
+mod rect;
 mod scale;
-mod shape;
 mod size;
 mod vec;
 
 use std::cmp::Ordering;
 
 pub use approx::ApproxEq;
+pub use bez::{Bez, BezShape, ParseSvgError};
 pub use length::{pt, Length, ParseLengthError, FlexLength};
 pub use point::Point;
 pub use range::{Range, RangeKey, Region};
+pub use rect::Rect;
 pub use scale::Scale;
-pub use shape::{Rect, Shape};
 pub use size::{Dim, Margins, Size, VDim};
 pub use vec::Vec2;
 
