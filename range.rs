@@ -188,7 +188,7 @@ impl Debug for Range {
 
 /// A hashable `Range` which hashes to the same value for very close ranges (at
 /// least most of the time, if you're unlucky the ranges _just_ fall into
-/// different slots).
+/// different buckets).
 #[derive(Debug, Copy, Clone)]
 pub struct RangeKey(pub Range);
 

@@ -49,10 +49,10 @@ macro_rules! impl_approx_eq {
     };
 }
 
-/// Ensures that two values are approximately equal by the `ApproxEq` trait.
+/// Ensures that two values are approximately equal.
 ///
-/// The default tolerance is `1e-5`, but it can be changed through a keyword
-/// argument.
+/// The comparison is performed through the `ApproxEq` trait. The default
+/// tolerance is `1e-5`, but it can be changed through a keyword argument.
 ///
 /// # Examples
 /// These comparisons work out fine:
