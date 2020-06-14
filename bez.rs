@@ -1,6 +1,7 @@
 use std::fmt;
 use svgtypes::{PathParser, PathSegment};
-use super::{ApproxEq, Length, Point};
+use flo_curves::{BezierCurve, BoundingBox, Coord2 as FloCoord};
+use super::{ApproxEq, Length, Point, Rect};
 
 /// A closed shape defined by a list of connected cubic bezier curves.
 #[derive(Debug, Clone, PartialEq)]
@@ -8,17 +9,6 @@ pub struct BezShape {
     /// The list of start-, control- and endpoints as explained in
     /// `BezShape::new`.
     points: Vec<Point>,
-}
-
-/// A cubic bezier curve.
-///
-/// Such a curve consists of a start point, two control points and an end point.
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub struct Bez {
-    pub start: Point,
-    pub c1: Point,
-    pub c2: Point,
-    pub end: Point,
 }
 
 impl BezShape {
@@ -130,6 +120,31 @@ impl BezShape {
         Ok(BezShape::new(points))
     }
 
+    /// The axis-aligned bounding box of the shape.
+    pub fn bounds(&self) -> Rect {
+        let mut bounds = Rect::new(self.points[0], self.points[0]);
+        for bez in self.curves() {
+            bounds = bounds.union(bez.bounds());
+        }
+        bounds
+    }
+
+    /// Translate the shape along the `x` and `y` axes.
+    pub fn translate(&mut self, x: Length, y: Length) {
+        for point in &mut self.points {
+            point.x += x;
+            point.y += y;
+        }
+    }
+
+    /// Scale the shape along the `x` and `y` axes.
+    pub fn scale(&mut self, x: f32, y: f32) {
+        for point in &mut self.points {
+            point.x *= x;
+            point.y *= y;
+        }
+    }
+
     /// Iterator over the bezier curves defined by the point listing.
     pub fn curves<'a>(&'a self) -> impl Iterator<Item=Bez> + 'a {
         curves(&self.points)
@@ -137,7 +152,6 @@ impl BezShape {
 }
 
 impl_approx_eq!(BezShape [points]);
-impl_approx_eq!(Bez [start, c1, c2, end]);
 
 /// Iterator over the curves defined by a point list.
 fn curves<'a>(points: &'a [Point]) -> impl Iterator<Item=Bez> + 'a {
@@ -156,6 +170,26 @@ fn curves<'a>(points: &'a [Point]) -> impl Iterator<Item=Bez> + 'a {
         }
     })
 }
+
+/// A cubic bezier curve.
+///
+/// Such a curve consists of a start point, two control points and an end point.
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct Bez {
+    pub start: Point,
+    pub c1: Point,
+    pub c2: Point,
+    pub end: Point,
+}
+
+impl Bez {
+    /// The axis-aligned bounding box of the curve.
+    pub fn bounds(self) -> Rect {
+        rect(flo_curve(self).bounding_box::<FloBounds>())
+    }
+}
+
+impl_approx_eq!(Bez [start, c1, c2, end]);
 
 /// An error that can occur when parsing a `BezShape` from a svg path.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -187,24 +221,50 @@ impl fmt::Display for ParseSvgError {
 
 impl std::error::Error for ParseSvgError {}
 
+type FloCurve = flo_curves::bezier::Curve<FloCoord>;
+type FloBounds = flo_curves::Bounds<FloCoord>;
+
+/// Transform a curve struct into a flo curve.
+fn flo_curve(curve: Bez) -> FloCurve {
+    FloCurve {
+        start_point: flo_coord(curve.start),
+        control_points: (flo_coord(curve.c1), flo_coord(curve.c2)),
+        end_point: flo_coord(curve.end),
+    }
+}
+
+/// Transform a point into flo coordinate.
+fn flo_coord(point: Point) -> FloCoord {
+    FloCoord(point.x.to_pt() as f64, point.y.to_pt() as f64)
+}
+
+/// Transform a flo coordinate into a point.
+fn point(coord: FloCoord) -> Point {
+    Point::new(Length::pt(coord.0 as f32), Length::pt(coord.1 as f32))
+}
+
+/// Transform flo bounds into a rect.
+fn rect(bounds: FloBounds) -> Rect {
+    Rect::new(point(bounds.min()), point(bounds.max()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::pt;
     use super::*;
 
-    macro_rules! bezshape {
+    macro_rules! points {
         ($(($x:expr, $y:expr)),* $(,)?) => {
-            BezShape {
-                points: vec![$(Point::new(pt($x as f32), pt($y as f32))),*],
-            }
+            vec![$(Point::new(pt($x as f32), pt($y as f32))),*]
         };
     }
 
     #[test]
     fn test_parse_svg_path_with_line_commands() {
+        let shape = BezShape::from_svg_path("M20 107.5L43 20.5H80L98.5 107.5H20Z").unwrap();
         assert_approx_eq!(
-            BezShape::from_svg_path("M20 107.5L43 20.5H80L98.5 107.5H20Z").unwrap(),
-            bezshape![
+            shape.points,
+            points![
                 (20, 107.5),
                 (20, 107.5),
                 (43, 20.5),
@@ -223,10 +283,10 @@ mod tests {
 
     #[test]
     fn test_parse_svg_path_consisting_of_only_one_curve() {
-        let bez = BezShape::from_svg_path("M5 43C125 18 -25 -37 5 43Z").unwrap();
-        assert_approx_eq!(bez, bezshape![(5, 43), (125, 18), (-25, -37)]);
+        let shape = BezShape::from_svg_path("M5 43C125 18 -25 -37 5 43Z").unwrap();
+        assert_approx_eq!(shape.points, points![(5, 43), (125, 18), (-25, -37)]);
         assert_approx_eq!(
-            bez.curves().collect::<Vec<_>>(),
+            shape.curves().collect::<Vec<_>>(),
             vec![Bez {
                 start: Point::new(pt(5.0), pt(43.0)),
                 c1: Point::new(pt(125.0), pt(18.0)),
@@ -238,9 +298,10 @@ mod tests {
 
     #[test]
     fn test_parse_svg_path_automatically_closes_path() {
+        let shape = BezShape::from_svg_path("M1 15C10 -4 35 -4 45 15Z").unwrap();
         assert_approx_eq!(
-            BezShape::from_svg_path("M1 15C10 -4 35 -4 45 15Z").unwrap(),
-            bezshape![
+            shape.points,
+            points![
                 (1, 15),
                 (10, -4),
                 (35, -4),
