@@ -191,7 +191,7 @@ impl Bez {
         let dir = omt * omt * omt * self.start.to_vec2()
              + 3.0 * omt * omt * t * self.c1.to_vec2()
              + 3.0 * omt * t * t * self.c2.to_vec2()
-             + t * t * t * self.c2.to_vec2();
+             + t * t * t * self.end.to_vec2();
         dir.to_point()
     }
 
@@ -238,18 +238,18 @@ impl Bez {
 }
 
 /// Find all `t` values where the curve has the given `v` value in the dimension
-/// for which `p0` to `p3` are the values of the control points.
+/// for which the control values are given.
 fn find_t_for_v(
-    p0: Length,
-    p1: Length,
-    p2: Length,
-    p3: Length,
+    start: Length,
+    c1: Length,
+    c2: Length,
+    end: Length,
     v: Length,
 ) -> ArrayVec<[f32; 3]> {
-    let a = (-p0 + 3.0 * p1 - 3.0 * p2 + p3).to_pt();
-    let b = (3.0 * p0 - 6.0 * p1 + 3.0 * p2).to_pt();
-    let c = (-3.0 * p0 + 3.0 * p1).to_pt();
-    let d = (p0 - v).to_pt();
+    let a = (-start + 3.0 * c1 - 3.0 * c2 + end).to_pt();
+    let b = (3.0 * start - 6.0 * c1 + 3.0 * c2).to_pt();
+    let c = (-3.0 * start + 3.0 * c1).to_pt();
+    let d = (start - v).to_pt();
     root_array::<[f32; 3]>(find_roots_cubic(a, b, c, d))
         .into_iter()
         .filter(|&t| 0.0 <= t && t <= 1.0)
