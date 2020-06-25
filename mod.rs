@@ -3,6 +3,7 @@
 #[macro_use]
 mod approx;
 mod bez;
+pub mod collision;
 mod length;
 mod point;
 mod range;

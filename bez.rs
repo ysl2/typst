@@ -1,6 +1,8 @@
 use std::fmt;
-use svgtypes::{PathParser, PathSegment};
+use arrayvec::{Array, ArrayVec};
 use flo_curves::{BezierCurve, BoundingBox, Coord2 as FloCoord};
+use roots::{find_roots_cubic, Roots};
+use svgtypes::{PathParser, PathSegment};
 use super::{ApproxEq, Length, Point, Rect};
 
 /// A closed shape defined by a list of connected cubic bezier curves.
@@ -8,7 +10,7 @@ use super::{ApproxEq, Length, Point, Rect};
 pub struct BezShape {
     /// The list of start-, control- and endpoints as explained in
     /// `BezShape::new`.
-    points: Vec<Point>,
+    pub points: Vec<Point>,
 }
 
 impl BezShape {
@@ -183,10 +185,90 @@ pub struct Bez {
 }
 
 impl Bez {
+    /// Evaluate the curve for parameter value `t`.
+    pub fn point_for_t(self, t: f32) -> Point {
+        let omt = 1.0 - t;
+        let dir = omt * omt * omt * self.start.to_vec2()
+             + 3.0 * omt * omt * t * self.c1.to_vec2()
+             + 3.0 * omt * t * t * self.c2.to_vec2()
+             + t * t * t * self.c2.to_vec2();
+        dir.to_point()
+    }
+
+    /// Solve a cubic equation to find the `y` values corresponding to an `x`.
+    pub fn y_for_x(self, x: Length) -> ArrayVec<[Length; 3]> {
+        self.t_for_x(x)
+            .into_iter()
+            .map(|t| self.point_for_t(t).y)
+            .collect()
+    }
+
+    /// Solve a cubic equation to find the `x` values corresponding to a `y`.
+    pub fn x_for_y(self, y: Length) -> ArrayVec<[Length; 3]> {
+        self.t_for_y(y)
+            .into_iter()
+            .map(|t| self.point_for_t(t).x)
+            .collect()
+    }
+
+    /// Find all `t` values where the curve has the given `x` value.
+    pub fn t_for_x(self, x: Length) -> ArrayVec<[f32; 3]> {
+        find_t_for_v(self.start.x, self.c1.x, self.c2.x, self.end.x, x)
+    }
+
+    /// Find all `t` values where the curve has the given `y` value.
+    pub fn t_for_y(self, y: Length) -> ArrayVec<[f32; 3]> {
+        find_t_for_v(self.start.y, self.c1.y, self.c2.y, self.end.y, y)
+    }
+
     /// The axis-aligned bounding box of the curve.
     pub fn bounds(self) -> Rect {
         rect(flo_curve(self).bounding_box::<FloBounds>())
     }
+
+    /// The reverse curve (`start` & `end` and `c1` & `c2` swapped).
+    pub fn rev(self) -> Self {
+        Self {
+            start: self.end,
+            c1: self.c2,
+            c2: self.c1,
+            end: self.start,
+        }
+    }
+}
+
+/// Find all `t` values where the curve has the given `v` value in the dimension
+/// for which `p0` to `p3` are the values of the control points.
+fn find_t_for_v(
+    p0: Length,
+    p1: Length,
+    p2: Length,
+    p3: Length,
+    v: Length,
+) -> ArrayVec<[f32; 3]> {
+    let a = (-p0 + 3.0 * p1 - 3.0 * p2 + p3).to_pt();
+    let b = (3.0 * p0 - 6.0 * p1 + 3.0 * p2).to_pt();
+    let c = (-3.0 * p0 + 3.0 * p1).to_pt();
+    let d = (p0 - v).to_pt();
+    root_array::<[f32; 3]>(find_roots_cubic(a, b, c, d))
+        .into_iter()
+        .filter(|&t| 0.0 <= t && t <= 1.0)
+        .collect()
+}
+
+/// Convert a `Roots` enum to an `ArrayVec`.
+fn root_array<A: Array<Item=f32>>(roots: Roots<f32>) -> ArrayVec<A> {
+    let mut v = ArrayVec::new();
+    match roots {
+        Roots::No(_) => {}
+        Roots::One([t1]) => { v.push(t1); }
+        Roots::Two([t1, t2]) => { v.push(t1); v.push(t2); }
+        Roots::Three([t1, t2, t3]) => { v.push(t1); v.push(t2); v.push(t3); }
+        Roots::Four([t1, t2, t3, t4]) => {
+            v.push(t1); v.push(t2); v.push(t3); v.push(t4);
+        }
+    }
+    v
 }
 
 impl_approx_eq!(Bez [start, c1, c2, end]);
@@ -311,4 +393,6 @@ mod tests {
             ]
         );
     }
+
+    // TODO: Tests for bezier curve root finding methods.
 }

@@ -38,6 +38,11 @@ impl Point {
         Point { x: v, y: v }
     }
 
+    /// Returns the vector defined by this point.
+    pub fn to_vec2(self) -> Vec2 {
+        Vec2 { x: self.x, y: self.y }
+    }
+
     /// A point with the minimum coordinates of this and another point.
     pub fn min(self, other: Point) -> Point {
         Point {
