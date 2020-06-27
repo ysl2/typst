@@ -30,9 +30,9 @@ impl BezColliderGroup {
     ///   without colliding with the shape.
     /// - The whole object is placed below `top` (that is `point.y - dim.height
     ///   >= top`).
-    pub fn place(&self, dim: Dim, _top: Length) -> Point {
+    pub fn place(&self, dim: Dim, _top: Length) -> Option<Point> {
         assert_eq!(self.segments.len(), 1);
-        self.segments[0].search_bisect(dim, 1e-2).expect("oops")
+        self.segments[0].search_bisect(dim, 1e-2)
     }
 }
 
@@ -54,6 +54,7 @@ impl BezColliderSegment {
 
         // If the object is higher than the segment, it cannot fit.
         if top > bot {
+            println!("info: height does not fit");
             return None;
         }
 
@@ -81,6 +82,7 @@ impl BezColliderSegment {
         // interval between top and bottom width and as such if the width is not
         // in the interval, there is no surely match.
         if width < min_width || width > max_width {
+            println!("info: width does not fit");
             return None;
         }
 
@@ -98,7 +100,7 @@ impl BezColliderSegment {
 
             // Check whether we converged to a good spot.
             if y_width.approx_eq(&width, tolerance) {
-                println!("info: convereged in {}. iteration", iter);
+                println!("info: converged in {}. iteration", iter);
                 return Some(Point::new(left_x, y));
             }
 
@@ -153,8 +155,20 @@ fn tighter_offset(widening: bool, vdim: VDim) -> Length {
 }
 
 /// Tries to find the only `x` position at which the curve has the given `y`
-/// value and panics if there are no or multiple such positions.
+/// value.
+///
+/// This will panic if there are no or multiple such positions except if `y` is
+/// equal to the start- or end-points y-coordinate.
 fn find_one_x(curve: Bez, y: Length) -> Length {
+    const EPS: f32 = 1e-4;
+
+    // No need to compute roots for start and end point.
+    if y.approx_eq(&curve.start.y, EPS) {
+        return curve.start.x;
+    } else if y.approx_eq(&curve.end.y, EPS) {
+        return curve.end.x;
+    }
+
     match curve.x_for_y(y).as_slice() {
         &[] => panic!("there should be at least one root"),
         &[x] => x,
@@ -199,7 +213,7 @@ mod tests {
         let dim = Dim::new(pt(50.0), pt(10.0), pt(5.0));
         let correct = Point::new(pt(35.0), pt(40.0) + dim.height);
         let found = collider.place(dim, pt(25.0));
-        assert_approx_eq!(found, correct);
+        assert_approx_eq!(found, Some(correct));
     }
 
     #[test]
@@ -213,7 +227,7 @@ mod tests {
         let dim = Dim::new(pt(70.0), pt(10.0), pt(20.0));
         let approx_correct = Point::new(pt(25.0), pt(66.0) + dim.height);
         let found = collider.place(dim, pt(0.0));
-        assert_approx_eq!(found, approx_correct, tolerance = 1.0);
+        assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
     }
 
     #[test]
@@ -224,6 +238,6 @@ mod tests {
         let dim = Dim::new(pt(40.0), pt(10.0), pt(20.0));
         let approx_correct = Point::new(pt(31.0), pt(75.0) - dim.depth);
         let found = collider.place(dim, pt(0.0));
-        assert_approx_eq!(found, approx_correct, tolerance = 1.0);
+        assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
     }
 }
