@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 
 pub use approx::ApproxEq;
 pub use bez::{Bez, BezShape, ParseSvgError};
-pub use length::{pt, Length, ParseLengthError, FlexLength};
+pub use length::{pt, min, max, Length, ParseLengthError, FlexLength};
 pub use point::Point;
 pub use range::{Range, RangeKey, Region};
 pub use rect::Rect;

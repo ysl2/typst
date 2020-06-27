@@ -1,6 +1,6 @@
 //! Collisions and placement of objects.
 
-use super::{ApproxEq, Bez, Dim, VDim, Length, Point};
+use super::{value_no_nans, min, max, ApproxEq, Bez, Dim, Length, Point};
 
 #[derive(Debug, Clone)]
 pub struct BezColliderGroup {
@@ -27,106 +27,48 @@ impl BezColliderGroup {
     /// - The whole object is placed below `top` (that is `point.y - dim.height
     ///   >= top`).
     pub fn place(&self, dim: Dim, _top: Length) -> Option<Point> {
-        self.segments[0].search_bisect(dim, 1e-2)
+        const TOLERANCE: f32 = 1e-2;
+
+        for (f, first) in self.segments.iter().enumerate() {
+            let mut top = first.top() + dim.height;
+            let first_max_bot = first.bot() + dim.height;
+
+            for (l, last) in self.segments.iter().enumerate().skip(f) {
+                // The real top and bottom ends of the search interval for the
+                // object's origin point are inset by the height and depth of
+                // the object - lower or higher would make the object stick out.
+                let last_max_bot  = last.bot() - dim.depth;
+                let bot = min(first_max_bot, last_max_bot);
+
+                // If the object is higher than the available space, it cannot
+                // fit.
+                if top > bot {
+                    println!("info: skipping last segment");
+                    continue;
+                }
+
+                let segments = &self.segments[f ..= l];
+                let found = search_bisect(dim, top, bot, segments, TOLERANCE);
+                if found.is_some() {
+                    return found;
+                }
+
+                // If the first segment is exhausted, we can leave the inner
+                // loop.
+                if last_max_bot > first_max_bot {
+                    println!("info: leaving first segment");
+                    break;
+                }
+
+                top = bot;
+            }
+        }
+
+        None
     }
 }
 
 impl BezColliderSegment {
-    /// Search for a position in this segment to fit the given dimensions.
-    ///
-    /// The returned point lies on the left border at a position where the
-    /// distance to the right border is `width`.
-    fn search_bisect(&self, dim: Dim, tolerance: f32) -> Option<Point> {
-        const MAX_ITERS: usize = 20;
-
-        let Dim { width, height, depth } = dim;
-
-        // The real top and bottom end of the search interval for the object's
-        // origin point is inset by the height and depth of the object - lower
-        // or higher would make the object stick out of the segment.
-        let mut top = self.top() + height;
-        let mut bot = self.bot() - depth;
-
-        // If the object is higher than the segment, it cannot fit.
-        if top > bot {
-            println!("info: object is too high");
-            return None;
-        }
-
-        // Which corner (top or bottom) of the object we want to check against
-        // each border depending on whether the border curve in question is
-        // widening or shrinking the segment with growing y-value.
-        let offsets = (
-            tighter_offset(self.left.start.x >= self.left.end.x, dim.vdim()),
-            tighter_offset(self.right.start.x <= self.right.end.x, dim.vdim()),
-        );
-
-        // Determine the widths at the boundaries.
-        let (top_left_x, top_right_x) = self.borders_x_for_y(top, offsets);
-        let (bot_left_x, bot_right_x) = self.borders_x_for_y(bot, offsets);
-        let mut top_width = top_right_x - top_left_x;
-        let mut bot_width = bot_right_x - bot_left_x;
-
-        // If it already fits at the top, we're good.
-        if width <= top_width {
-            println!("info: fits at the top");
-            return Some(Point::new(top_left_x, top));
-        }
-
-        // If it does not fit at the top and also not at the bottom, it won't fit
-        // at all, since the width function is monotonous.
-        if width > bot_width {
-            println!("info: object is too wide");
-            return None;
-        }
-
-        let mut iter = 1;
-        loop {
-            // Determine the next `y` value by linear interpolation between the
-            // min and max bounds.
-            let ratio = (width - top_width) / (bot_width - top_width);
-            let y = top + ratio * (bot - top);
-
-            let (left_x, right_x) = self.borders_x_for_y(y, offsets);
-            let y_width = right_x - left_x;
-
-            // Check whether we converged to a good spot.
-            if y_width.approx_eq(&width, tolerance) {
-                println!("info: converged in {}. iteration", iter);
-                return Some(Point::new(left_x, y));
-            }
-
-            // Adjust the bounds by replacing the bad bound with the better
-            // estimate.
-            if width < y_width {
-                bot = y;
-                bot_width = y_width;
-            } else {
-                top = y;
-                top_width = y_width;
-            }
-
-            if iter > MAX_ITERS {
-                println!("warning: bisection search did not converge");
-                return None;
-            }
-
-            iter += 1;
-        }
-    }
-
-    /// The `x` values at y-values `y + offsets.0` for the left and
-    /// `y + offsets.1` for the right border.
-    fn borders_x_for_y(
-        &self,
-        y: Length,
-        offsets: (Length, Length),
-    ) -> (Length, Length) {
-        let left_x  = find_one_x(self.left, y + offsets.0);
-        let right_x = find_one_x(self.right, y + offsets.1);
-        (left_x, right_x)
-    }
-
     /// The top end of this segment.
     fn top(&self) -> Length {
         self.left.start.y
@@ -136,27 +78,143 @@ impl BezColliderSegment {
     fn bot(&self) -> Length {
         self.left.end.y
     }
+
+    /// Whether the left border is monotonously widening the segment.
+    fn left_widening(&self) -> bool {
+        self.left.start.x >= self.left.end.x
+    }
+
+    /// Whether the right border is monotonously widening the segment.
+    fn right_widening(&self) -> bool {
+        self.right.start.x <= self.right.end.x
+    }
 }
 
-/// The offset from the origin point to the corner (top or bottom) at which the
-/// curve is tighter. The bool `widening` should be true when the curve is
-/// widening the segment from with growing y-value.
-fn tighter_offset(widening: bool, vdim: VDim) -> Length {
-    if widening { -vdim.height } else { vdim.depth }
-}
-
-/// Tries to find the only `x` position at which the curve has the given `y`
-/// value.
+/// Search for a vertical position to place an object with dimensions `dim`
+/// at origin positions between `top` and `bot`.
 ///
-/// This will panic if there are no or multiple such positions except if `y` is
-/// equal to the start- or end-points y-coordinate.
-fn find_one_x(curve: Bez, y: Length) -> Length {
-    const EPS: f32 = 1e-4;
+/// At least one segment must be given.
+///
+/// The top end of the object must fall into the first segment and the bot
+/// end into last segment for all values between `top` and `bot`. As a
+/// consequence, all inner segments are fully filled by the object,
+/// vertically.
+fn search_bisect(
+    dim: Dim,
+    mut top: Length,
+    mut bot: Length,
+    segments: &[BezColliderSegment],
+    tolerance: f32,
+) -> Option<Point> {
+    const MAX_ITERS: usize = 20;
 
-    // No need to compute roots for start and end point.
-    if y.approx_eq(&curve.start.y, EPS) {
+    let len   = segments.len();
+    let first = &segments[0];
+    let mid   = &segments[1 .. (len - 1).max(1)];
+    let last  = &segments[len - 1];
+
+    assert!(top + dim.depth >= last.top(), "does not end in last segment");
+    assert!(bot - dim.height <= first.bot(), "does not start in first segment");
+
+    // The offset from the origin point to the corner (top or bottom) at which
+    // the curve is tighter. The bool `widening` should be true when the curve
+    // is widening the segment from with growing y-value.
+    let tightest_offset = |widening: bool| -> Length {
+        if widening { -dim.height } else { dim.depth }
+    };
+
+    let left_first_offset  = tightest_offset(first.left_widening());
+    let left_last_offset   = tightest_offset(last.left_widening());
+    let right_first_offset = tightest_offset(first.right_widening());
+    let right_last_offset  = tightest_offset(last.right_widening());
+
+    let left_mid_x = mid
+        .iter()
+        .map(|seg| max(seg.left.start.x, seg.left.end.x))
+        .max_by(value_no_nans)
+        .unwrap_or(Length::NEG_INF);
+
+    let right_mid_x = mid
+        .iter()
+        .map(|seg| min(seg.right.start.x, seg.right.end.x))
+        .min_by(value_no_nans)
+        .unwrap_or(Length::INF);
+
+    // Left x, right x and width if the object's origin is placed at `y`.
+    let lrxw_at_y = |y: Length| {
+        // TODO: Don't compute twice if first == last.
+        let left_first_x = find_one_x(first.left, y + left_first_offset);
+        let left_last_x  = find_one_x(last.left,  y + left_last_offset);
+        let left_x = left_first_x.max(left_mid_x).max(left_last_x);
+
+        let right_first_x = find_one_x(first.right, y + right_first_offset);
+        let right_last_x  = find_one_x(last.right,  y + right_last_offset);
+        let right_x = right_first_x.min(right_mid_x).min(right_last_x);
+
+        let width = right_x - left_x;
+        (left_x, right_x, width)
+    };
+
+    let (top_left_x, _, mut top_width) = lrxw_at_y(top);
+    let (_,          _, mut bot_width) = lrxw_at_y(bot);
+
+    // If it already fits at the top, we're good.
+    if dim.width <= top_width {
+        println!("info: fits at the top");
+        return Some(Point::new(top_left_x, top));
+    }
+
+    // If it does not fit at the top and also not at the bottom, it won't
+    // fit at all, since the width function is monotonous.
+    if dim.width > bot_width {
+        println!("info: object is too wide");
+        return None;
+    }
+
+    let mut iter = 1;
+    loop {
+        // Determine the next `y` value by linear interpolation between the
+        // min and max bounds.
+        let ratio = (dim.width - top_width) / (bot_width - top_width);
+        let y = top + ratio * (bot - top);
+        let (left_x, _, width) = lrxw_at_y(y);
+
+        // Check whether we converged to a good spot.
+        if width.approx_eq(&dim.width, tolerance) {
+            println!("info: converged in {}. iteration", iter);
+            return Some(Point::new(left_x, y));
+        }
+
+        // Adjust the bounds by replacing the bad bound with the better
+        // estimate.
+        if dim.width < width {
+            bot = y;
+            bot_width = width;
+        } else {
+            top = y;
+            top_width = width;
+        }
+
+        if iter > MAX_ITERS {
+            println!("warning: bisection search did not converge");
+            return None;
+        }
+
+        iter += 1;
+    }
+}
+
+/// Tries to to find an `x` position at which the given `curve` has the given
+/// `y` value. The `y` value is clamped into the valid y-range for the curve.
+///
+/// The curve must be monotonic and the min-max rectangle defined by start and
+/// end point must be a bounding box for the curve.
+fn find_one_x(curve: Bez, y: Length) -> Length {
+    const EPS: Length = Length::pt(1e-4);
+
+    if y < curve.start.y + EPS {
         return curve.start.x;
-    } else if y.approx_eq(&curve.end.y, EPS) {
+    } else if y > curve.end.y - EPS {
         return curve.end.x;
     }
 
@@ -172,19 +230,6 @@ mod tests {
     use super::super::{BezShape, Rect, Vec2, pt};
     use super::*;
 
-    fn shape(path: &str) -> BezShape {
-        BezShape::from_svg_path(path).unwrap()
-    }
-
-    fn collider_curves_0_2(shape: &BezShape) -> BezColliderGroup {
-        let curves: Vec<_> = shape.curves().collect();
-        BezColliderGroup {
-            segments: vec![
-                BezColliderSegment { left: curves[0].rev(), right: curves[2] },
-            ],
-        }
-    }
-
     #[allow(unused)]
     fn dim_rect(point: Point, dim: Dim) -> Rect {
         Rect::new(
@@ -193,14 +238,27 @@ mod tests {
         )
     }
 
+    fn shape(path: &str) -> BezShape {
+        BezShape::from_svg_path(path).unwrap()
+    }
+
+    fn left_right_collider(shape: &BezShape) -> BezColliderGroup {
+        let curves: Vec<_> = shape.curves().collect();
+        BezColliderGroup {
+            segments: vec![
+                BezColliderSegment { left: curves[0].rev(), right: curves[2] },
+            ],
+        }
+    }
+
     #[test]
     fn test_place_into_trapez() {
         let shape = shape("M20 100L40 20H80L100 100H20Z");
-        let collider = collider_curves_0_2(&shape);
 
         let dim = Dim::new(pt(50.0), pt(10.0), pt(5.0));
         let correct = Point::new(pt(35.0), pt(40.0) + dim.height);
-        let found = collider.place(dim, pt(25.0));
+
+        let found = left_right_collider(&shape).place(dim, pt(25.0));
         assert_approx_eq!(found, Some(correct));
     }
 
@@ -210,42 +268,63 @@ mod tests {
             M20 100C20 100 28 32 40 20C52 8.00005 66 8.5 80 20C94 31.5 100 100
             100 100H20Z
         ");
-        let collider = collider_curves_0_2(&shape);
 
         let dim = Dim::new(pt(70.0), pt(10.0), pt(20.0));
         let approx_correct = Point::new(pt(25.0), pt(66.0) + dim.height);
-        let found = collider.place(dim, pt(0.0));
+
+        let found = left_right_collider(&shape).place(dim, pt(0.0));
         assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
     }
 
     #[test]
     fn test_place_into_tailplane() {
         let shape = shape("M38 100L16 20H52.5L113 100H38Z");
-        let collider = collider_curves_0_2(&shape);
 
         let dim = Dim::new(pt(40.0), pt(10.0), pt(20.0));
         let approx_correct = Point::new(pt(31.0), pt(75.0) - dim.depth);
-        let found = collider.place(dim, pt(0.0));
+
+        let found = left_right_collider(&shape).place(dim, pt(0.0));
         assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
     }
 
-    #[test]
-    fn test_place_into_hat() {
+    fn hat_collider() -> BezColliderGroup {
         let shape = shape("
             M65.5 27.5H21.5L29 64.5L15.5 104.5H98L80 64.5L65.5 27.5Z
         ");
 
         let curves: Vec<_> = shape.curves().collect();
-        let collider = BezColliderGroup {
+        BezColliderGroup {
             segments: vec![
                 BezColliderSegment { left: curves[1], right: curves[5].rev() },
                 BezColliderSegment { left: curves[2], right: curves[4].rev() },
             ]
-        };
+        }
+    }
 
-        let dim1 = Dim::new(pt(35.0), pt(15.0), pt(14.0));
-        let approx_correct = Point::new(pt(28.0), pt(57.0) - dim1.depth);
-        let found = collider.place(dim1, pt(0.0));
+    #[test]
+    fn test_place_into_top_of_hat() {
+        let dim = Dim::new(pt(35.0), pt(15.0), pt(15.0));
+        let approx_correct = Point::new(pt(28.0), pt(58.0) - dim.depth);
+
+        let found = hat_collider().place(dim, pt(0.0));
+        assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
+    }
+
+    #[test]
+    fn test_place_into_mid_of_hat() {
+        let dim = Dim::new(pt(43.0), pt(15.0), pt(15.0));
+        let approx_correct = Point::new(pt(29.0), pt(44.0) + dim.height);
+
+        let found = hat_collider().place(dim, pt(0.0));
+        assert_approx_eq!(found, Some(approx_correct), tolerance = 0.1);
+    }
+
+    #[test]
+    fn test_place_into_bot_of_hat() {
+        let dim = Dim::new(pt(65.0), pt(10.0), pt(2.0));
+        let approx_correct = Point::new(pt(23.0), pt(83.0) + dim.height);
+
+        let found = hat_collider().place(dim, pt(0.0));
         assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
     }
 }

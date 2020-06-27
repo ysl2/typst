@@ -85,8 +85,18 @@ impl Length {
 }
 
 /// Shorthand for [`Length::pt`].
-pub fn pt(pt: f32) -> Length {
+pub const fn pt(pt: f32) -> Length {
     Length { pt }
+}
+
+/// Alternative form for [`Length::min`].
+pub fn min(a: Length, b: Length) -> Length {
+    a.min(b)
+}
+
+/// Alternative form for [`Length::max`].
+pub fn max(a: Length, b: Length) -> Length {
+    a.max(b)
 }
 
 impl_approx_eq!(Length [pt]);
