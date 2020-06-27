@@ -9,10 +9,6 @@ pub struct BezColliderGroup {
 
 #[derive(Debug, Clone)]
 struct BezColliderSegment {
-    /// The top end of the segment.
-    top: Length,
-    /// The bottom end of the segment.
-    bot: Length,
     /// The left border of the segment.
     /// (Start point is at the top, end point at the bottom)
     left: Bez,
@@ -31,7 +27,6 @@ impl BezColliderGroup {
     /// - The whole object is placed below `top` (that is `point.y - dim.height
     ///   >= top`).
     pub fn place(&self, dim: Dim, _top: Length) -> Option<Point> {
-        assert_eq!(self.segments.len(), 1);
         self.segments[0].search_bisect(dim, 1e-2)
     }
 }
@@ -49,12 +44,12 @@ impl BezColliderSegment {
         // The real top and bottom end of the search interval for the object's
         // origin point is inset by the height and depth of the object - lower
         // or higher would make the object stick out of the segment.
-        let top = self.top + height;
-        let bot = self.bot - depth;
+        let mut top = self.top() + height;
+        let mut bot = self.bot() - depth;
 
         // If the object is higher than the segment, it cannot fit.
         if top > bot {
-            println!("info: height does not fit");
+            println!("info: object is too high");
             return None;
         }
 
@@ -67,22 +62,21 @@ impl BezColliderSegment {
         );
 
         // Determine the widths at the boundaries.
-        let top_width = self.width_at(top, offsets);
-        let bot_width = self.width_at(bot, offsets);
+        let (top_left_x, top_right_x) = self.borders_x_for_y(top, offsets);
+        let (bot_left_x, bot_right_x) = self.borders_x_for_y(bot, offsets);
+        let mut top_width = top_right_x - top_left_x;
+        let mut bot_width = bot_right_x - bot_left_x;
 
-        // Match top and bottom to min and max.
-        let (mut min, mut min_width, mut max, mut max_width) =
-            if top_width <= bot_width {
-                (top, top_width, bot, bot_width)
-            } else {
-                (bot, bot_width, top, top_width)
-            };
+        // If it already fits at the top, we're good.
+        if width <= top_width {
+            println!("info: fits at the top");
+            return Some(Point::new(top_left_x, top));
+        }
 
-        // Since the border curves are monotone, all widths are inside the
-        // interval between top and bottom width and as such if the width is not
-        // in the interval, there is no surely match.
-        if width < min_width || width > max_width {
-            println!("info: width does not fit");
+        // If it does not fit at the top and also not at the bottom, it won't fit
+        // at all, since the width function is monotonous.
+        if width > bot_width {
+            println!("info: object is too wide");
             return None;
         }
 
@@ -90,10 +84,8 @@ impl BezColliderSegment {
         loop {
             // Determine the next `y` value by linear interpolation between the
             // min and max bounds.
-            let delta = max_width - min_width;
-            let target = width - min_width;
-            let ratio = target / delta;
-            let y = min + ratio * (max - min);
+            let ratio = (width - top_width) / (bot_width - top_width);
+            let y = top + ratio * (bot - top);
 
             let (left_x, right_x) = self.borders_x_for_y(y, offsets);
             let y_width = right_x - left_x;
@@ -104,14 +96,14 @@ impl BezColliderSegment {
                 return Some(Point::new(left_x, y));
             }
 
-            // Adjust the bounds by replacing the correct bounds with the
-            // current estimate.
+            // Adjust the bounds by replacing the bad bound with the better
+            // estimate.
             if width < y_width {
-                max = y;
-                max_width = y_width;
+                bot = y;
+                bot_width = y_width;
             } else {
-                min = y;
-                min_width = y_width;
+                top = y;
+                top_width = y_width;
             }
 
             if iter > MAX_ITERS {
@@ -121,17 +113,6 @@ impl BezColliderSegment {
 
             iter += 1;
         }
-    }
-
-    /// The usable width between the left border at y-value `y + offsets.0` and
-    /// the right border at `y + offsets.1`.
-    fn width_at(
-        &self,
-        y: Length,
-        offsets: (Length, Length),
-    ) -> Length {
-        let (left_x, right_x) = self.borders_x_for_y(y, offsets);
-        right_x - left_x
     }
 
     /// The `x` values at y-values `y + offsets.0` for the left and
@@ -144,6 +125,16 @@ impl BezColliderSegment {
         let left_x  = find_one_x(self.left, y + offsets.0);
         let right_x = find_one_x(self.right, y + offsets.1);
         (left_x, right_x)
+    }
+
+    /// The top end of this segment.
+    fn top(&self) -> Length {
+        self.left.start.y
+    }
+
+    /// The bottom end of this segment.
+    fn bot(&self) -> Length {
+        self.left.end.y
     }
 }
 
@@ -185,15 +176,12 @@ mod tests {
         BezShape::from_svg_path(path).unwrap()
     }
 
-    fn collider(shape: &BezShape) -> BezColliderGroup {
+    fn collider_curves_0_2(shape: &BezShape) -> BezColliderGroup {
         let curves: Vec<_> = shape.curves().collect();
         BezColliderGroup {
-            segments: vec![BezColliderSegment {
-                top: pt(20.0),
-                bot: pt(100.0),
-                left: curves[0].rev(),
-                right: curves[2],
-            }],
+            segments: vec![
+                BezColliderSegment { left: curves[0].rev(), right: curves[2] },
+            ],
         }
     }
 
@@ -208,7 +196,7 @@ mod tests {
     #[test]
     fn test_place_into_trapez() {
         let shape = shape("M20 100L40 20H80L100 100H20Z");
-        let collider = collider(&shape);
+        let collider = collider_curves_0_2(&shape);
 
         let dim = Dim::new(pt(50.0), pt(10.0), pt(5.0));
         let correct = Point::new(pt(35.0), pt(40.0) + dim.height);
@@ -222,7 +210,7 @@ mod tests {
             M20 100C20 100 28 32 40 20C52 8.00005 66 8.5 80 20C94 31.5 100 100
             100 100H20Z
         ");
-        let collider = collider(&shape);
+        let collider = collider_curves_0_2(&shape);
 
         let dim = Dim::new(pt(70.0), pt(10.0), pt(20.0));
         let approx_correct = Point::new(pt(25.0), pt(66.0) + dim.height);
@@ -233,11 +221,31 @@ mod tests {
     #[test]
     fn test_place_into_tailplane() {
         let shape = shape("M38 100L16 20H52.5L113 100H38Z");
-        let collider = collider(&shape);
+        let collider = collider_curves_0_2(&shape);
 
         let dim = Dim::new(pt(40.0), pt(10.0), pt(20.0));
         let approx_correct = Point::new(pt(31.0), pt(75.0) - dim.depth);
         let found = collider.place(dim, pt(0.0));
+        assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
+    }
+
+    #[test]
+    fn test_place_into_hat() {
+        let shape = shape("
+            M65.5 27.5H21.5L29 64.5L15.5 104.5H98L80 64.5L65.5 27.5Z
+        ");
+
+        let curves: Vec<_> = shape.curves().collect();
+        let collider = BezColliderGroup {
+            segments: vec![
+                BezColliderSegment { left: curves[1], right: curves[5].rev() },
+                BezColliderSegment { left: curves[2], right: curves[4].rev() },
+            ]
+        };
+
+        let dim1 = Dim::new(pt(35.0), pt(15.0), pt(14.0));
+        let approx_correct = Point::new(pt(28.0), pt(57.0) - dim1.depth);
+        let found = collider.place(dim1, pt(0.0));
         assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
     }
 }
