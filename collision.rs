@@ -1,12 +1,16 @@
-//! Collisions and placement of objects.
+//! Collisionless placement of objects.
 
 use super::{value_no_nans, min, max, ApproxEq, Bez, Dim, Length, Point};
 
+/// A data structure for fast, collisionless placement of objects into a group
+/// of bezier shapes.
 #[derive(Debug, Clone)]
 pub struct BezColliderGroup {
+    /// The segment in the order they should be tried in.
     segments: Vec<BezColliderSegment>,
 }
 
+/// A width-monotonic vertical segment defined by a left and right border.
 #[derive(Debug, Clone)]
 struct BezColliderSegment {
     /// The left border of the segment.
@@ -18,14 +22,14 @@ struct BezColliderSegment {
 }
 
 impl BezColliderGroup {
-    /// Finds the top-most point in the shape to place an object with dimensions
-    /// `dim`.
+    /// Finds the top-most position in the group to place an object with
+    /// dimensions `dim`. Returns the origin point for the object.
     ///
-    /// Specifically, the point is selected such that:
+    /// The point is selected such that:
     /// - An object with dimensions `dim` fits at that baseline anchor point
-    ///   without colliding with the shape.
-    /// - The whole object is placed below `top` (that is `point.y - dim.height
-    ///   >= top`).
+    ///   without colliding with any of the shapes in the group.
+    /// - The whole object is placed below `top`
+    ///   (that is `point.y - dim.height >= top`).
     pub fn place(&self, dim: Dim, _top: Length) -> Option<Point> {
         const TOLERANCE: f32 = 1e-2;
 
@@ -89,6 +93,9 @@ impl BezColliderSegment {
         self.right.start.x <= self.right.end.x
     }
 }
+
+impl_approx_eq!(BezColliderGroup [segments]);
+impl_approx_eq!(BezColliderSegment [left, right]);
 
 /// Search for a vertical position to place an object with dimensions `dim`
 /// at origin positions between `top` and `bot`.
@@ -218,7 +225,7 @@ fn find_one_x(curve: Bez, y: Length) -> Length {
         return curve.end.x;
     }
 
-    match curve.x_for_y(y).as_slice() {
+    match curve.solve_x_for_y(y).as_slice() {
         &[] => panic!("there should be at least one root"),
         &[x] => x,
         xs => panic!("curve is not monotone and has multiple roots: {:?}", xs),
@@ -327,4 +334,5 @@ mod tests {
         let found = hat_collider().place(dim, pt(0.0));
         assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
     }
+
 }

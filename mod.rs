@@ -3,7 +3,7 @@
 #[macro_use]
 mod approx;
 mod bez;
-pub mod collision;
+mod flo;
 mod length;
 mod point;
 mod range;
@@ -12,13 +12,16 @@ mod scale;
 mod size;
 mod vec;
 
+pub mod collision;
+pub mod roots;
+
 use std::cmp::Ordering;
 
 pub use approx::ApproxEq;
 pub use bez::{Bez, BezShape, ParseSvgError};
 pub use length::{pt, min, max, Length, ParseLengthError, FlexLength};
 pub use point::Point;
-pub use range::{Range, RangeKey, Region};
+pub use range::{Range, Region};
 pub use rect::Rect;
 pub use scale::Scale;
 pub use size::{Dim, Margins, Size, VDim};

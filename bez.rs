@@ -1,7 +1,5 @@
 use std::fmt;
-use arrayvec::{Array, ArrayVec};
-use flo_curves::{BezierCurve, BoundingBox, Coord2 as FloCoord};
-use roots::{find_roots_cubic, Roots};
+use arrayvec::ArrayVec;
 use svgtypes::{PathParser, PathSegment};
 use super::{ApproxEq, Length, Point, Rect};
 
@@ -10,7 +8,7 @@ use super::{ApproxEq, Length, Point, Rect};
 pub struct BezShape {
     /// The list of start-, control- and endpoints as explained in
     /// `BezShape::new`.
-    pub points: Vec<Point>,
+    points: Vec<Point>,
 }
 
 impl BezShape {
@@ -196,34 +194,35 @@ impl Bez {
     }
 
     /// Solve a cubic equation to find the `y` values corresponding to an `x`.
-    pub fn y_for_x(self, x: Length) -> ArrayVec<[Length; 3]> {
-        self.t_for_x(x)
+    pub fn solve_y_for_x(self, x: Length) -> ArrayVec<[Length; 3]> {
+        self.solve_t_for_x(x)
             .into_iter()
             .map(|t| self.point_for_t(t).y)
             .collect()
     }
 
     /// Solve a cubic equation to find the `x` values corresponding to a `y`.
-    pub fn x_for_y(self, y: Length) -> ArrayVec<[Length; 3]> {
-        self.t_for_y(y)
+    pub fn solve_x_for_y(self, y: Length) -> ArrayVec<[Length; 3]> {
+        self.solve_t_for_y(y)
             .into_iter()
             .map(|t| self.point_for_t(t).x)
             .collect()
     }
 
     /// Find all `t` values where the curve has the given `x` value.
-    pub fn t_for_x(self, x: Length) -> ArrayVec<[f32; 3]> {
-        find_t_for_v(self.start.x, self.c1.x, self.c2.x, self.end.x, x)
+    pub fn solve_t_for_x(self, x: Length) -> ArrayVec<[f32; 3]> {
+        solve_t_for_v(self.start.x, self.c1.x, self.c2.x, self.end.x, x)
     }
 
     /// Find all `t` values where the curve has the given `y` value.
-    pub fn t_for_y(self, y: Length) -> ArrayVec<[f32; 3]> {
-        find_t_for_v(self.start.y, self.c1.y, self.c2.y, self.end.y, y)
+    pub fn solve_t_for_y(self, y: Length) -> ArrayVec<[f32; 3]> {
+        solve_t_for_v(self.start.y, self.c1.y, self.c2.y, self.end.y, y)
     }
 
     /// The axis-aligned bounding box of the curve.
     pub fn bounds(self) -> Rect {
-        rect(flo_curve(self).bounding_box::<FloBounds>())
+        use super::flo::*;
+        unflo_rect(flo_curve(self).bounding_box::<FloBounds>())
     }
 
     /// The reverse curve (`start` & `end` and `c1` & `c2` swapped).
@@ -239,7 +238,7 @@ impl Bez {
 
 /// Find all `t` values where the curve has the given `v` value in the dimension
 /// for which the control values are given.
-fn find_t_for_v(
+fn solve_t_for_v(
     start: Length,
     c1: Length,
     c2: Length,
@@ -250,30 +249,16 @@ fn find_t_for_v(
     let b = (3.0 * start - 6.0 * c1 + 3.0 * c2).to_pt();
     let c = (-3.0 * start + 3.0 * c1).to_pt();
     let d = (start - v).to_pt();
-    root_array::<[f32; 3]>(find_roots_cubic(a, b, c, d))
+
+    super::roots::solve_cubic(a, b, c, d)
         .into_iter()
         .filter(|&t| 0.0 <= t && t <= 1.0)
         .collect()
 }
 
-/// Convert a `Roots` enum to an `ArrayVec`.
-fn root_array<A: Array<Item=f32>>(roots: Roots<f32>) -> ArrayVec<A> {
-    let mut v = ArrayVec::new();
-    match roots {
-        Roots::No(_) => {}
-        Roots::One([t1]) => { v.push(t1); }
-        Roots::Two([t1, t2]) => { v.push(t1); v.push(t2); }
-        Roots::Three([t1, t2, t3]) => { v.push(t1); v.push(t2); v.push(t3); }
-        Roots::Four([t1, t2, t3, t4]) => {
-            v.push(t1); v.push(t2); v.push(t3); v.push(t4);
-        }
-    }
-    v
-}
-
 impl_approx_eq!(Bez [start, c1, c2, end]);
 
-/// An error that can occur when parsing a `BezShape` from a svg path.
+/// An error that can occur when parsing a `BezShape` from an svg path.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum ParseSvgError {
     /// The path is invalid.
@@ -302,33 +287,6 @@ impl fmt::Display for ParseSvgError {
 }
 
 impl std::error::Error for ParseSvgError {}
-
-type FloCurve = flo_curves::bezier::Curve<FloCoord>;
-type FloBounds = flo_curves::Bounds<FloCoord>;
-
-/// Transform a curve struct into a flo curve.
-fn flo_curve(curve: Bez) -> FloCurve {
-    FloCurve {
-        start_point: flo_coord(curve.start),
-        control_points: (flo_coord(curve.c1), flo_coord(curve.c2)),
-        end_point: flo_coord(curve.end),
-    }
-}
-
-/// Transform a point into flo coordinate.
-fn flo_coord(point: Point) -> FloCoord {
-    FloCoord(point.x.to_pt() as f64, point.y.to_pt() as f64)
-}
-
-/// Transform a flo coordinate into a point.
-fn point(coord: FloCoord) -> Point {
-    Point::new(Length::pt(coord.0 as f32), Length::pt(coord.1 as f32))
-}
-
-/// Transform flo bounds into a rect.
-fn rect(bounds: FloBounds) -> Rect {
-    Rect::new(point(bounds.min()), point(bounds.max()))
-}
 
 #[cfg(test)]
 mod tests {

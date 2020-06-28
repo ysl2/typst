@@ -1,6 +1,4 @@
-use std::cmp::{PartialEq, Eq};
 use std::fmt::{self, Debug, Formatter};
-use std::hash::{Hash, Hasher};
 use super::{value_no_nans, Length};
 
 /// A range (_start_ / _end_) along an axis.
@@ -184,34 +182,6 @@ impl Debug for Range {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "[{} .. {}]", self.start, self.end)
     }
-}
-
-/// A hashable `Range` which hashes to the same value for very close ranges (at
-/// least most of the time, if you're unlucky the ranges _just_ fall into
-/// different buckets).
-#[derive(Debug, Copy, Clone)]
-pub struct RangeKey(pub Range);
-
-impl Hash for RangeKey {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        key(self.0).hash(state);
-    }
-}
-
-impl PartialEq for RangeKey {
-    fn eq(&self, other: &Self) -> bool {
-        key(self.0) == key(other.0)
-    }
-}
-
-impl Eq for RangeKey {}
-
-fn key(range: Range) -> (i32, i32) {
-    (slot(range.start), slot(range.end))
-}
-
-fn slot(x: Length) -> i32 {
-    (x.to_pt() * 1000.0).round() as i32
 }
 
 #[cfg(test)]
