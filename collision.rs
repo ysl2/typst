@@ -1,6 +1,8 @@
 //! Collisionless placement of objects.
 
-use super::{value_no_nans, min, max, ApproxEq, Bez, Dim, Length, Point};
+use super::{
+    max, min, value_no_nans, ApproxEq, Bez, BezShape, Dim, Length, Point,
+};
 
 /// A data structure for fast, collisionless placement of objects into a group
 /// of bezier shapes.
@@ -22,6 +24,68 @@ struct BezColliderSegment {
 }
 
 impl BezColliderGroup {
+    /// Create a new empty collider group.
+    pub fn new(shape: &BezShape) -> BezColliderGroup {
+        use super::flo::*;
+
+        const TOLERANCE: f32 = 1e-2;
+
+        let mut lines = vec![];
+
+        for curve in shape.curves() {
+            lines.push(curve.start.y);
+            lines.push(curve.end.y);
+
+            let ts = flo_curve(curve).find_extremities();
+            for t in ts {
+                lines.push(curve.point_for_t(t as f32).y)
+            }
+        }
+
+        lines.sort_by(value_no_nans);
+        lines.dedup_by(|a, b| a.approx_eq(&b, TOLERANCE));
+
+        let mut segments = vec![];
+
+        for chunk in lines.windows(2) {
+            let top = chunk[0];
+            let bot = chunk[1];
+
+            let mut borders = vec![];
+
+            for curve in shape.curves() {
+                let top_hits = curve.solve_t_for_y(top);
+                let bot_hits = curve.solve_t_for_y(bot);
+
+                if top_hits.len() == 1 && bot_hits.len() == 1 {
+                    let t_start = top_hits[0];
+                    let t_end = bot_hits[0];
+
+                    let t_min = t_start.min(t_end) as f64;
+                    let t_max = t_start.max(t_end) as f64;
+
+                    let mut section = unflo_bez(flo_curve(curve).section(t_min, t_max));
+                    if section.start.y > section.end.y {
+                        section = section.rev();
+                    }
+
+                    borders.push(section);
+                }
+            }
+
+            borders.sort_by(|a, b| value_no_nans(&a.start.x, &b.start.x));
+
+            if borders.len() == 2 {
+                segments.push(BezColliderSegment {
+                    left: borders[0],
+                    right: borders[1],
+                });
+            }
+        }
+
+        BezColliderGroup { segments }
+    }
+
     /// Finds the top-most position in the group to place an object with
     /// dimensions `dim`. Returns the origin point for the object.
     ///
@@ -294,11 +358,12 @@ mod tests {
         assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
     }
 
-    fn hat_collider() -> BezColliderGroup {
-        let shape = shape("
-            M65.5 27.5H21.5L29 64.5L15.5 104.5H98L80 64.5L65.5 27.5Z
-        ");
+    fn hat_shape() -> BezShape {
+        shape("M65.5 27.5H21.5L29 64.5L15.5 104.5H98L80 64.5L65.5 27.5Z")
+    }
 
+    fn hat_collider() -> BezColliderGroup {
+        let shape = hat_shape();
         let curves: Vec<_> = shape.curves().collect();
         BezColliderGroup {
             segments: vec![
@@ -335,4 +400,23 @@ mod tests {
         assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
     }
 
+    #[test]
+    fn test_build_hat_collider() {
+        let shape = hat_shape();
+        let collider = BezColliderGroup::new(&shape);
+        assert_approx_eq!(collider, hat_collider());
+    }
+
+    #[test]
+    fn test_build_curvy_collider() {
+        let shape = shape("
+            M32.2171 19C32.2171 19 16.2907 22.3262 14.5088 30.3292C12.6925
+            38.4862 14.5088 87.4283 40.8443 111.446C49.5993 119.431 85.2274
+            117.402 104.867 101.476C112.132 95.5853 98.51 33.9545 98.51
+            33.9545C98.51 33.9545 88.1128 31.0753 82.6178 33.9545C76.9571
+            36.9206 73.5366 47.5495 73.5366 47.5495H50.3796L32.2171 19Z
+        ");
+
+        let _collider = BezColliderGroup::new(&shape);
+    }
 }
