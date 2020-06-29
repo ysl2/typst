@@ -299,25 +299,28 @@ mod tests {
         };
     }
 
+    macro_rules! bez {
+        ($($tts:tt)*) => {{
+            let points = points![$($tts)*];
+            Bez {
+                start: points[0],
+                c1: points[1],
+                c2: points[2],
+                end: points[3],
+            }
+        }};
+    }
+
     #[test]
     fn test_parse_svg_path_with_line_commands() {
         let shape = BezShape::from_svg_path("M20 107.5L43 20.5H80L98.5 107.5H20Z").unwrap();
         assert_approx_eq!(
             shape.points,
             points![
-                (20, 107.5),
-                (20, 107.5),
-                (43, 20.5),
-                (43, 20.5),
-                (43, 20.5),
-                (80, 20.5),
-                (80, 20.5),
-                (80, 20.5),
-                (98.5, 107.5),
-                (98.5, 107.5),
-                (98.5, 107.5),
-                (20, 107.5),
-            ]
+                (20, 107.5), (20, 107.5), (43, 20.5), (43, 20.5), (43, 20.5),
+                (80, 20.5), (80, 20.5), (80, 20.5), (98.5, 107.5),
+                (98.5, 107.5), (98.5, 107.5), (20, 107.5),
+            ],
         );
     }
 
@@ -327,12 +330,7 @@ mod tests {
         assert_approx_eq!(shape.points, points![(5, 43), (125, 18), (-25, -37)]);
         assert_approx_eq!(
             shape.curves().collect::<Vec<_>>(),
-            vec![Bez {
-                start: Point::new(pt(5.0), pt(43.0)),
-                c1: Point::new(pt(125.0), pt(18.0)),
-                c2: Point::new(pt(-25.0), pt(-37.0)),
-                end: Point::new(pt(5.0), pt(43.0)),
-            }],
+            vec![bez![(5, 43), (125, 18), (-25, -37), (5, 43)]],
         )
     }
 
@@ -341,16 +339,48 @@ mod tests {
         let shape = BezShape::from_svg_path("M1 15C10 -4 35 -4 45 15Z").unwrap();
         assert_approx_eq!(
             shape.points,
-            points![
-                (1, 15),
-                (10, -4),
-                (35, -4),
-                (45, 15),
-                (45, 15),
-                (1, 15),
-            ]
+            points![(1, 15), (10, -4), (35, -4), (45, 15), (45, 15), (1, 15)],
         );
     }
 
-    // TODO: Tests for bezier curve root finding methods.
+    fn simple_curve() -> Bez {
+        bez![(0, 0), (35, 0), (80, 35), (80, 70)]
+    }
+
+    #[test]
+    fn test_bez_point_for_t() {
+        let bez = simple_curve();
+
+        assert_approx_eq!(bez.point_for_t(0.0), bez.start);
+        assert_approx_eq!(bez.point_for_t(1.0), bez.end);
+
+        let point = Point::new(pt(32.7), pt(8.5));
+        assert_approx_eq!(bez.point_for_t(0.3), point, tolerance=0.1);
+    }
+
+    #[test]
+    fn test_bez_solve_for_coordinate_for_different_sampled_points() {
+        let eps = 1e-3;
+        let bez = simple_curve();
+
+        let ts = [0.0, 0.01, 0.2, 0.5, 0.7, 0.99, 1.0];
+        for &t in &ts {
+            let Point { x, y } = bez.point_for_t(t);
+
+            assert_approx_eq!(bez.solve_t_for_x(x).to_vec(), vec![t], tolerance=eps);
+            assert_approx_eq!(bez.solve_t_for_y(y).to_vec(), vec![t], tolerance=eps);
+            assert_approx_eq!(bez.solve_y_for_x(x).to_vec(), vec![y], tolerance=eps);
+            assert_approx_eq!(bez.solve_x_for_y(y).to_vec(), vec![x], tolerance=eps);
+        }
+    }
+
+    #[test]
+    fn test_bez_solve_for_coordinate_out_of_bounds() {
+        let bez = simple_curve();
+
+        assert!(bez.solve_x_for_y(pt(-10.0)).is_empty());
+        assert!(bez.solve_x_for_y(pt(100.0)).is_empty());
+        assert!(bez.solve_y_for_x(pt(-20.0)).is_empty());
+        assert!(bez.solve_y_for_x(pt(100.0)).is_empty());
+    }
 }
