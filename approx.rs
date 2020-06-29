@@ -1,16 +1,16 @@
 /// Trait for approximate floating point comparisons.
 pub trait ApproxEq {
-    fn approx_eq(&self, other: &Self, tolerance: f32) -> bool;
+    fn approx_eq(&self, other: &Self, tolerance: f64) -> bool;
 }
 
-impl ApproxEq for f32 {
-    fn approx_eq(&self, other: &Self, tolerance: f32) -> bool {
+impl ApproxEq for f64 {
+    fn approx_eq(&self, other: &Self, tolerance: f64) -> bool {
         (self - other).abs() < tolerance
     }
 }
 
 impl<T> ApproxEq for Vec<T> where T: ApproxEq {
-    fn approx_eq(&self, other: &Self, tolerance: f32) -> bool {
+    fn approx_eq(&self, other: &Self, tolerance: f64) -> bool {
         self.len() == other.len() &&
         self.iter().zip(other)
             .all(|(x, y)| x.approx_eq(y, tolerance))
@@ -18,7 +18,7 @@ impl<T> ApproxEq for Vec<T> where T: ApproxEq {
 }
 
 impl<T> ApproxEq for [T] where T: ApproxEq {
-    fn approx_eq(&self, other: &Self, tolerance: f32) -> bool {
+    fn approx_eq(&self, other: &Self, tolerance: f64) -> bool {
         self.len() == other.len() &&
         self.iter().zip(other)
             .all(|(x, y)| x.approx_eq(y, tolerance))
@@ -26,7 +26,7 @@ impl<T> ApproxEq for [T] where T: ApproxEq {
 }
 
 impl<T> ApproxEq for Option<T> where T: ApproxEq {
-    fn approx_eq(&self, other: &Self, tolerance: f32) -> bool {
+    fn approx_eq(&self, other: &Self, tolerance: f64) -> bool {
         match (self, other) {
             (Some(x), Some(y)) => x.approx_eq(y, tolerance),
             (None, None) => true,
@@ -40,7 +40,7 @@ impl<T> ApproxEq for Option<T> where T: ApproxEq {
 macro_rules! impl_approx_eq {
     ($type:ty [$($field:ident),*]) => {
         impl $crate::geom::ApproxEq for $type {
-            fn approx_eq(&self, other: &Self, tolerance: f32) -> bool {
+            fn approx_eq(&self, other: &Self, tolerance: f64) -> bool {
                 $($crate::geom::ApproxEq::approx_eq(
                     &self.$field, &other.$field, tolerance
                 ))&&*
@@ -48,6 +48,15 @@ macro_rules! impl_approx_eq {
         }
     };
 }
+
+impl_approx_eq!(super::Point [x, y]);
+impl_approx_eq!(super::Vec2 [x, y]);
+impl_approx_eq!(super::Size [width, height]);
+impl_approx_eq!(super::Insets [x0, x1, y0, y1]);
+impl_approx_eq!(super::Line [p0, p1]);
+impl_approx_eq!(super::QuadBez [p0, p1, p2]);
+impl_approx_eq!(super::CubicBez [p0, p1, p2, p3]);
+impl_approx_eq!(super::Rect [x0, y0, x1, y1]);
 
 /// Ensures that two values are approximately equal.
 ///
