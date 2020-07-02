@@ -1,8 +1,8 @@
 //! Collisionless placement of objects.
 
 use super::{
-    max, min, value_no_nans, ApproxEq, BezPath, CubicBez, Dim, Point,
-    ParamCurveSolve
+    max, min, value_no_nans, value_approx, ApproxEq, BezPath, CubicBez, Dim,
+    Point, PathSeg, ParamCurve, ParamCurveExtrema, ParamCurveSolve,
 };
 
 /// A data structure for fast, collisionless placement of objects into a group
@@ -26,7 +26,17 @@ struct BezColliderSegment {
 
 impl BezColliderGroup {
     /// Create a new empty collider group.
-    pub fn new(_path: &BezPath) -> BezColliderGroup {
+    pub fn new(path: &BezPath, tolerance: f64) -> BezColliderGroup {
+        // TODO: Also split at intersections.
+        let (monotonics, splits) = split_monotonics(path, tolerance);
+
+        let mut rows = split_rows(&monotonics, &splits, tolerance);
+        for row in rows.iter_mut() {
+            // Does not matter whether we use start x or end x because the
+            // segments should not have intersections at this point.
+            row.sort_by(|a, b| value_no_nans(&a.start().x, &b.start().x));
+        }
+
         todo!("collider group new")
     }
 
@@ -38,72 +48,135 @@ impl BezColliderGroup {
     ///   without colliding with any of the shapes in the group.
     /// - The whole object is placed below `top`
     ///   (that is `point.y - dim.height >= top`).
-    pub fn place(&self, dim: Dim, _top: f64) -> Option<Point> {
-        const TOLERANCE: f64 = 1e-2;
+    pub fn place(&self, dim: Dim, _top: f64, tolerance: f64) -> Option<Point> {
+        search_place(&self.segments, dim, tolerance)
+    }
+}
 
-        for (f, first) in self.segments.iter().enumerate() {
-            let mut top = first.top() + dim.height;
-            let first_max_bot = first.bot() + dim.height;
+/// Split the path into monotonic subsegments and return alongside all
+/// y-coordinates at which curves start, end or were splitted.
+fn split_monotonics(path: &BezPath, tolerance: f64) -> (Vec<PathSeg>, Vec<f64>) {
+    let mut monotonics = vec![];
+    let mut splits = vec![];
 
-            for (l, last) in self.segments.iter().enumerate().skip(f) {
-                // The real top and bottom ends of the search interval for the
-                // object's origin point are inset by the height and depth of
-                // the object - lower or higher would make the object stick out.
-                let last_max_bot  = last.bot() - dim.depth;
-                let bot = min(first_max_bot, last_max_bot);
+    // Split curves into monotonic subsegments.
+    for seg in path.segments() {
+        splits.push(seg.start().y);
 
-                // If the object is higher than the available space, it cannot
-                // fit.
-                if top > bot {
-                    println!("info: skipping last segment");
-                    continue;
-                }
-
-                let segments = &self.segments[f ..= l];
-                let found = search_bisect(dim, top, bot, segments, TOLERANCE);
-                if found.is_some() {
-                    return found;
-                }
-
-                // If the first segment is exhausted, we can leave the inner
-                // loop.
-                if last_max_bot > first_max_bot {
-                    println!("info: leaving first segment");
-                    break;
-                }
-
-                top = bot;
-            }
+        let mut t_start = 0.0;
+        for t in seg.extrema() {
+            monotonics.push(seg.subsegment(t_start .. t));
+            splits.push(seg.eval(t).y);
+            t_start = t;
         }
 
-        None
+        monotonics.push(seg.subsegment(t_start .. 1.0));
+        splits.push(seg.end().y);
     }
+
+    // Make the splits `y`-unique.
+    splits.sort_by(value_no_nans);
+    splits.dedup_by(|a, b| a.approx_eq(&b, tolerance));
+
+    (monotonics, splits)
 }
 
-impl BezColliderSegment {
-    /// The top end of this segment.
-    fn top(&self) -> f64 {
-        self.left.p0.y
+/// Split monotonics segments into rows of subsegments such that no segment
+/// crosses a vertical split.
+fn split_rows(
+    monotonics: &[PathSeg],
+    splits: &[f64],
+    tolerance: f64
+) -> Vec<Vec<PathSeg>> {
+    let mut rows = vec![vec![]; splits.len() - 1];
+
+    // Split curves at y values.
+    for &seg in monotonics {
+        let seg = if seg.start().y < seg.end().y { seg } else { seg.reverse() };
+        let top = seg.start().y;
+        let bot = seg.end().y;
+
+        let find_k_for_y = |y| {
+            splits.binary_search_by(|v| value_approx(&v, &y, tolerance))
+                .expect("splits does not contain y")
+        };
+
+        // Find start and end values in split list.
+        let k0 = find_k_for_y(top);
+        let k1 = find_k_for_y(bot);
+        assert!(k0 <= k1);
+
+        match k1 - k0 {
+            // The segment is horizontal and thus uninteresting.
+            0 => {}
+
+            // The segment does not need to be subdivided.
+            1 => rows[k0].push(seg),
+
+            // The segment has to be subdivided.
+            _ => {
+                let mut t_start = 0.0;
+                for ki in k0 + 1 .. k1 {
+                    let t = match seg.solve_t_for_y(splits[ki]).as_slice() {
+                        &[t] => t,
+                        _ => panic!("curve is not monotonic"),
+                    };
+
+                    rows[ki - 1].push(seg.subsegment(t_start .. t));
+                    t_start = t;
+                }
+
+                rows[k1 - 1].push(seg.subsegment(t_start .. 1.0));
+            }
+        }
     }
 
-    /// The bottom end of this segment.
-    fn bot(&self) -> f64 {
-        self.left.p3.y
-    }
-
-    /// Whether the left border is monotonously widening the segment.
-    fn left_widening(&self) -> bool {
-        self.left.p0.x >= self.left.p3.x
-    }
-
-    /// Whether the right border is monotonously widening the segment.
-    fn right_widening(&self) -> bool {
-        self.right.p0.x <= self.right.p3.x
-    }
+    rows
 }
 
-impl_approx_eq!(BezColliderGroup [segments]);
-impl_approx_eq!(BezColliderSegment [left, right]);
+/// Search for the top-most position in the first possible segment.
+fn search_place(
+    segments: &[BezColliderSegment],
+    dim: Dim,
+    tolerance: f64,
+) -> Option<Point> {
+    for (f, first) in segments.iter().enumerate() {
+        let mut top = first.top() + dim.height;
+        let first_max_bot = first.bot() + dim.height;
+
+        for (l, last) in segments.iter().enumerate().skip(f) {
+            // The real top and bottom ends of the search interval for the
+            // object's origin point are inset by the height and depth of
+            // the object - lower or higher would make the object stick out.
+            let last_max_bot  = last.bot() - dim.depth;
+            let bot = min(first_max_bot, last_max_bot);
+
+            // If the object is higher than the available space, it cannot
+            // fit.
+            if top > bot {
+                println!("info: skipping last segment");
+                continue;
+            }
+
+            let segments = &segments[f ..= l];
+            let found = search_bisect(dim, top, bot, segments, tolerance);
+            if found.is_some() {
+                return found;
+            }
+
+            // If the first segment is exhausted, we can leave the inner
+            // loop.
+            if last_max_bot > first_max_bot {
+                println!("info: leaving first segment");
+                break;
+            }
+
+            top = bot;
+        }
+    }
+
+    None
+}
 
 /// Search for a vertical position to place an object with dimensions `dim`
 /// at origin positions between `top` and `bot`.
@@ -240,6 +313,31 @@ fn find_one_x(curve: CubicBez, y: f64) -> f64 {
     }
 }
 
+impl BezColliderSegment {
+    /// The top end of this segment.
+    fn top(&self) -> f64 {
+        self.left.p0.y
+    }
+
+    /// The bottom end of this segment.
+    fn bot(&self) -> f64 {
+        self.left.p3.y
+    }
+
+    /// Whether the left border is monotonously widening the segment.
+    fn left_widening(&self) -> bool {
+        self.left.p0.x >= self.left.p3.x
+    }
+
+    /// Whether the right border is monotonously widening the segment.
+    fn right_widening(&self) -> bool {
+        self.right.p0.x <= self.right.p3.x
+    }
+}
+
+impl_approx_eq!(BezColliderGroup [segments]);
+impl_approx_eq!(BezColliderSegment [left, right]);
+
 #[cfg(test)]
 mod tests {
     use super::super::{BezPath, Rect, Vec2};
@@ -276,7 +374,7 @@ mod tests {
         let dim = Dim::new(50.0, 10.0, 5.0);
         let correct = Point::new(35.0, 40.0 + dim.height);
 
-        let found = left_right_collider(&shape).place(dim, 25.0);
+        let found = left_right_collider(&shape).place(dim, 25.0, 1e-2);
         assert_approx_eq!(found, Some(correct));
     }
 
@@ -290,7 +388,7 @@ mod tests {
         let dim = Dim::new(70.0, 10.0, 20.0);
         let approx_correct = Point::new(25.0, 66.0 + dim.height);
 
-        let found = left_right_collider(&shape).place(dim, 0.0);
+        let found = left_right_collider(&shape).place(dim, 0.0, 1e-2);
         assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
     }
 
@@ -301,7 +399,7 @@ mod tests {
         let dim = Dim::new(40.0, 10.0, 20.0);
         let approx_correct = Point::new(31.0, 75.0 - dim.depth);
 
-        let found = left_right_collider(&shape).place(dim, 0.0);
+        let found = left_right_collider(&shape).place(dim, 0.0, 1e-2);
         assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
     }
 
@@ -331,7 +429,7 @@ mod tests {
         let dim = Dim::new(35.0, 15.0, 15.0);
         let approx_correct = Point::new(28.0, 58.0 - dim.depth);
 
-        let found = hat_collider().place(dim, 0.0);
+        let found = hat_collider().place(dim, 0.0, 1e-2);
         assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
     }
 
@@ -340,7 +438,7 @@ mod tests {
         let dim = Dim::new(43.0, 15.0, 15.0);
         let approx_correct = Point::new(29.0, 44.0 + dim.height);
 
-        let found = hat_collider().place(dim, 0.0);
+        let found = hat_collider().place(dim, 0.0, 1e-2);
         assert_approx_eq!(found, Some(approx_correct), tolerance = 0.1);
     }
 
@@ -349,7 +447,18 @@ mod tests {
         let dim = Dim::new(65.0, 10.0, 2.0);
         let approx_correct = Point::new(23.0, 83.0 + dim.height);
 
-        let found = hat_collider().place(dim, 0.0);
+        let found = hat_collider().place(dim, 0.0, 1e-2);
         assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
+    }
+
+    #[test]
+    fn test_build_banner_collider() {
+        let shape = shape("
+            M29.0452 86.5001C27.5159 93.9653 26.1564 102.373 25 111.793L13
+            19H106.5L100.5 111.793C99.5083 103.022 97.8405 94.485 95.65
+            86.5C81.4874 34.8747 45.4731 6.3054 29.0452 86.5001Z
+        ");
+
+        let _collider = BezColliderGroup::new(&shape, 1e-2);
     }
 }
