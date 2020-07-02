@@ -12,7 +12,7 @@ pub mod collision;
 
 use std::cmp::Ordering;
 
-pub use approx::ApproxEq;
+pub use approx::{ApproxEq, value_approx};
 pub use bez::ParamCurveSolve;
 pub use dim::{Dim, VDim};
 pub use flex::Flex;

@@ -1,3 +1,6 @@
+use std::cmp::Ordering;
+use super::value_no_nans;
+
 /// Trait for approximate floating point comparisons.
 pub trait ApproxEq {
     fn approx_eq(&self, other: &Self, tolerance: f64) -> bool;
@@ -57,6 +60,16 @@ impl_approx_eq!(super::Line [p0, p1]);
 impl_approx_eq!(super::QuadBez [p0, p1, p2]);
 impl_approx_eq!(super::CubicBez [p0, p1, p2, p3]);
 impl_approx_eq!(super::Rect [x0, y0, x1, y1]);
+
+/// A comparison function for floats which returns equal when the the values are
+/// approximately equal and falls back to `value_no_nans` otherwise.
+pub fn value_approx(a: &f64, b: &f64, tolerance: f64) -> Ordering {
+    if a.approx_eq(b, tolerance) {
+        Ordering::Equal
+    } else {
+        value_no_nans(a, b)
+    }
+}
 
 /// Ensures that two values are approximately equal.
 ///
