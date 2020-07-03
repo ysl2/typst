@@ -5,22 +5,21 @@ use super::{
     Point, QuadBez, Rect, MAX_EXTREMA,
 };
 
-/// Find all the intersections of two curves.
+/// Find the intersections of two curves.
 ///
-/// The points are in no particular order.
+/// The points are in no particular order. No guarantees are made about which
+/// points are returned when the curves have coinciding segments.
 ///
 /// The size of the array-vec can be defined by the caller to give a boost in
 /// performance in situations were there is a known bound on the number of
 /// intersections. This is because this function is recursive and quite a few of
 /// those vecs will be allocated on the stack depending on the `accuracy`. To be
-/// safe in a cubic bezier situation, use `9`. For monotone curves, use `3`.
+/// safe in a cubic bezier situation, use `9`. For monotone curves, use `3`. At
+/// most as many intersection as the array-vec has capacity will be reported.
 ///
 /// This function computes many bounding boxes of curves. Since this operation
 /// is very fast for monotone curves, consider using the `Monotone` wrapper if
 /// your curves are monotone.
-///
-/// # Panics
-/// This will panic if the capacity of the array-vec is exceeded.
 pub fn intersect<C, A>(a: &C, b: &C, accuracy: f64) -> ArrayVec<A>
 where
     C: ParamCurveExtrema,
@@ -52,10 +51,13 @@ where
     let (a1, a2) = a.subdivide();
     let (b1, b2) = b.subdivide();
 
+    let double = 2.0 * accuracy;
     let mut extend = |values: ArrayVec<A>| {
         for point in values {
             // We don't want to count intersections twice.
-            if !result.iter().any(|p| p.approx_eq(&point, 10.0 * accuracy)) {
+            if !result.is_full() &&
+               !result.iter().any(|p| p.approx_eq(&point, double))
+            {
                 result.push(point);
             }
         }
@@ -371,5 +373,16 @@ mod tests {
             ],
             tolerance = 0.5,
         );
+    }
+
+    #[test]
+    fn test_intersect_curve_with_itself() {
+        let a1 = seg("M53 69C82 12 -2 -11 23 69");
+        let a2 = seg("M53 69C82 12 -2 -11 23 69");
+
+        let mut vec = intersect::<_, [_; 10]>(&a1, &a2, 0.01).to_vec();
+        vec.sort_by(|a, b| value_no_nans(&a.y, &b.y));
+
+        assert_eq!(vec.len(), 10);
     }
 }
