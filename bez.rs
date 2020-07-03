@@ -1,9 +1,127 @@
+use std::ops::Range;
 use arrayvec::{Array, ArrayVec};
-use super::{roots, CubicBez, Line, ParamCurve, PathSeg, QuadBez};
+use super::{
+    roots, ApproxEq, CubicBez, Line, ParamCurve, ParamCurveExtrema, PathSeg,
+    Point, QuadBez, Rect, MAX_EXTREMA,
+};
 
-/// The maximum number of solved `t` values for a coordinate value that can be
-/// reported in the `ParamCurveSolve` trait.
-pub const MAX_SOLVE: usize = 3;
+/// Find all the intersections of two curves.
+///
+/// The points are in no particular order.
+///
+/// The size of the array-vec can be defined by the caller to give a boost in
+/// performance in situations were there is a known bound on the number of
+/// intersections. This is because this function is recursive and quite a few of
+/// those vecs will be allocated on the stack depending on the `accuracy`. To be
+/// safe in a cubic bezier situation, use `9`. For monotone curves, use `3`.
+///
+/// This function computes many bounding boxes of curves. Since this operation
+/// is very fast for monotone curves, consider using the `Monotone` wrapper if
+/// your curves are monotone.
+///
+/// # Panics
+/// This will panic if the capacity of the array-vec is exceeded.
+pub fn intersect<C, A>(a: &C, b: &C, accuracy: f64) -> ArrayVec<A>
+where
+    C: ParamCurveExtrema,
+    A: Array<Item=Point>,
+{
+    let mut result = ArrayVec::new();
+
+    let ba = a.bounding_box();
+    let bb = b.bounding_box();
+
+    // When the bounding boxes don't overlap we have no intersection.
+    if ba.x1 < bb.x0 || bb.x1 < ba.x0 || ba.y1 < bb.y0 || bb.y1 < ba.y0 {
+        return result;
+    }
+
+    // When the bounding boxes do overlap, but one of the curves is smaller than
+    // the accuracy, any point inside that curve is fine as our intersection, so
+    // we just pick the center of its bounding box.
+    if ba.width() < accuracy && ba.height() < accuracy {
+        result.push(ba.center());
+        return result;
+    } else if bb.width() < accuracy && bb.height() < accuracy {
+        result.push(bb.center());
+        return result;
+    }
+
+    // When we are not at the accuracy level, we continue by subdividing both
+    // curves and intersecting each pair.
+    let (a1, a2) = a.subdivide();
+    let (b1, b2) = b.subdivide();
+
+    let mut extend = |values: ArrayVec<A>| {
+        for point in values {
+            // We don't want to count intersections twice.
+            if !result.iter().any(|p| p.approx_eq(&point, 10.0 * accuracy)) {
+                result.push(point);
+            }
+        }
+    };
+
+    extend(intersect(&a1, &b1, accuracy));
+    extend(intersect(&a1, &b2, accuracy));
+    extend(intersect(&a2, &b1, accuracy));
+    extend(intersect(&a2, &b2, accuracy));
+
+    result
+}
+
+/// A wrapper for curves that are monotone in both dimensions.
+///
+/// This auto-derefs to the wrapped curve, but overrides `ParamCurveExtrema`
+/// such that bounding-box computation is accelerated.
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct Monotone<C>(pub C);
+
+impl<C: ParamCurve> ParamCurve for Monotone<C> {
+    fn eval(&self, t: f64) -> Point {
+        self.0.eval(t)
+    }
+
+    fn start(&self) -> Point {
+        self.0.start()
+    }
+
+    fn end(&self) -> Point {
+        self.0.end()
+    }
+
+    fn subsegment(&self, range: Range<f64>) -> Self {
+        Monotone(self.0.subsegment(range))
+    }
+
+    fn subdivide(&self) -> (Self, Self) {
+        let (a, b) = self.0.subdivide();
+        (Monotone(a), Monotone(b))
+    }
+}
+
+impl<C: ParamCurve> ParamCurveExtrema for Monotone<C> {
+    fn extrema(&self) -> ArrayVec<[f64; MAX_EXTREMA]> {
+        ArrayVec::new()
+    }
+
+    fn extrema_ranges(&self) -> ArrayVec<[Range<f64>; 5]> {
+        let mut result = ArrayVec::new();
+        result.push(0.0 .. 1.0);
+        result
+    }
+
+    fn bounding_box(&self) -> Rect {
+        Rect::from_points(self.start(), self.end())
+    }
+}
+
+impl<C> std::ops::Deref for Monotone<C> {
+    type Target = C;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// A parameterized curve that can solve its `t` values for a coordinate value.
 pub trait ParamCurveSolve: ParamCurve {
@@ -29,6 +147,10 @@ pub trait ParamCurveSolve: ParamCurve {
             .collect()
     }
 }
+
+/// The maximum number of solved `t` values for a coordinate value that can be
+/// reported in the `ParamCurveSolve` trait.
+pub const MAX_SOLVE: usize = 3;
 
 impl ParamCurveSolve for PathSeg {
     fn solve_t_for_x(&self, x: f64) -> ArrayVec<[f64; MAX_SOLVE]> {
@@ -95,6 +217,7 @@ fn solve_cubic_t_for_v(
     filter_t(roots::solve_cubic(c0, c1, c2, c3))
 }
 
+/// Find all `t` values matching `v` for a quadratic curve.
 fn solve_quad_t_for_v(
     p0: f64,
     p1: f64,
@@ -108,6 +231,7 @@ fn solve_quad_t_for_v(
     filter_t(roots::solve_quadratic(c0, c1, c2))
 }
 
+/// Find all `t` values matching `v` for a linear curve.
 fn solve_line_t_for_v(
     p0: f64,
     p1: f64,
@@ -120,17 +244,21 @@ fn solve_line_t_for_v(
 }
 
 /// Filter out all t values that are not between 0 and 1.
-fn filter_t<A: Array<Item=f64>>(vec: ArrayVec<A>) -> ArrayVec<[f64; 3]> {
-    const EPS: f64 = 1e-4;
+fn filter_t(vec: ArrayVec<impl Array<Item=f64>>) -> ArrayVec<[f64; MAX_SOLVE]> {
+    const EPSILON: f64 = 1e-6;
     vec.into_iter()
-        .filter(|&t| -EPS <= t && t <= 1.0 + EPS)
+        .filter(|&t| -EPSILON <= t && t <= 1.0 + EPSILON)
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::Point;
+    use super::super::{value_no_nans, BezPath, Point};
     use super::*;
+
+    fn seg(d: &str) -> PathSeg {
+        BezPath::from_svg(d).unwrap().segments().next().unwrap()
+    }
 
     #[test]
     fn test_bez_point_for_t() {
@@ -191,5 +319,57 @@ mod tests {
             assert!(seg.solve_y_for_x(-20.0).is_empty());
             assert!(seg.solve_y_for_x(100.0).is_empty());
         }
+    }
+
+    #[test]
+    fn test_intersect_monotone_two_intersections() {
+        let a = Monotone(seg("M9 31C37.5 31 59 61 59 81"));
+        let b = Monotone(seg("M21 20C21 40 42.5 70 71 70"));
+
+        assert_approx_eq!(
+            intersect::<_, [_; 3]>(&a, &b, 0.01).to_vec(),
+            vec![Point::new(24.0, 34.0), Point::new(56.0, 67.0)],
+            tolerance = 0.5,
+        );
+    }
+
+    #[test]
+    fn test_intersect_monotone_three_intersections() {
+        let a = Monotone(seg("M59 81C14 74.5 37.5 31 9 31"));
+        let b = Monotone(seg("M17 31C17 81 50 53 50 81"));
+
+        let mut vec = intersect::<_, [_; 3]>(&a, &b, 0.01).to_vec();
+        vec.sort_by(|a, b| value_no_nans(&a.y, &b.y));
+
+        assert_approx_eq!(
+            vec,
+            vec![
+                Point::new(17.0, 32.5),
+                Point::new(31.5, 63.5),
+                Point::new(50.0, 79.0),
+            ],
+            tolerance = 0.25,
+        );
+    }
+
+    #[test]
+    fn test_intersect_not_monotone_five_intersections() {
+        let a = seg("M53 69C82 12 -2 -11 23 69");
+        let b = seg("M31 63C-71 14 187 75 11 17");
+
+        let mut vec = intersect::<_, [_; 5]>(&a, &b, 0.01).to_vec();
+        vec.sort_by(|a, b| value_no_nans(&a.y, &b.y));
+
+        assert_approx_eq!(
+            vec,
+            vec![
+                Point::new(25.0, 21.5),
+                Point::new(56.5, 33.0),
+                Point::new(18.0, 42.0),
+                Point::new(59.0, 44.0),
+                Point::new(20.0, 57.5),
+            ],
+            tolerance = 0.5,
+        );
     }
 }

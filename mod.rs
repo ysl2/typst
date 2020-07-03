@@ -12,7 +12,7 @@ mod scale;
 use std::cmp::Ordering;
 
 pub use approx::{ApproxEq, value_approx};
-pub use bez::ParamCurveSolve;
+pub use bez::{intersect, Monotone, ParamCurveSolve, MAX_SOLVE};
 pub use collision::PlacementGroup;
 pub use dim::{Dim, VDim};
 pub use flex::Flex;
@@ -41,6 +41,7 @@ pub use kurbo::{
     Affine, BezPath, Circle, CubicBez, Ellipse, Insets, Line, PathEl, PathSeg,
     ParamCurve, ParamCurveExtrema, Point, QuadBez, Rect, RoundedRect, Shape,
     Size, SvgParseError, TranslateScale, Vec2,
+    MAX_EXTREMA,
 };
 
 /// A comparison function for partial orderings which panics with
