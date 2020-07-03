@@ -383,8 +383,7 @@ mod tests {
     use super::super::{BezPath, Rect, Vec2};
     use super::*;
 
-    #[allow(unused)]
-    fn dim_rect(point: Point, dim: Dim) -> Rect {
+    fn _boxed(point: Point, dim: Dim) -> Rect {
         Rect::from_points(
             point - Vec2::new(0.0, dim.height),
             point + Vec2::new(dim.width, dim.depth),
@@ -395,40 +394,15 @@ mod tests {
         BezPath::from_svg(path).unwrap()
     }
 
-    #[test]
-    fn test_place_into_trapez() {
-        let shape = shape("M20 100L40 20H80L100 100H20Z");
-
-        let dim = Dim::new(50.0, 10.0, 5.0);
-        let correct = Point::new(35.0, 40.0 + dim.height);
-
-        let found = border_group(&shape).place(dim, (25.0, 0.0), 1e-2);
-        assert_approx_eq!(found, Some(correct));
+    fn skewed_vase_shape() -> BezPath {
+        shape("
+            M65 100C23.5 65 59 48 16 20H52.5C90.6055 29.0694 113 66.4999 113
+            100H65Z
+        ")
     }
 
-    #[test]
-    fn test_place_into_silo() {
-        let shape = shape("
-            M20 100C20 100 28 32 40 20C52 8.00005 66 8.5 80 20C94 31.5 100 100
-            100 100H20Z
-        ");
-
-        let dim = Dim::new(70.0, 10.0, 20.0);
-        let approx_correct = Point::new(25.0, 66.0 + dim.height);
-
-        let found = border_group(&shape).place(dim, (0.0, 0.0), 1e-2);
-        assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
-    }
-
-    #[test]
-    fn test_place_into_tailplane() {
-        let shape = shape("M38 100L16 20H52.5L113 100H38Z");
-
-        let dim = Dim::new(40.0, 10.0, 20.0);
-        let approx_correct = Point::new(31.0, 75.0 - dim.depth);
-
-        let found = border_group(&shape).place(dim, (0.0, 0.0), 1e-2);
-        assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
+    fn hat_shape() -> BezPath {
+        shape("M65.5 27.5H21.5L29 64.5L15.5 104.5H98L80 64.5L65.5 27.5Z")
     }
 
     fn border_group(shape: &BezPath) -> PlacementGroup {
@@ -444,37 +418,6 @@ mod tests {
             }],
             segments: vec![PlacementSegment { left, right }],
         }
-    }
-
-    #[test]
-    fn test_place_into_top_of_hat() {
-        let dim = Dim::new(35.0, 15.0, 15.0);
-        let approx_correct = Point::new(28.0, 58.0 - dim.depth);
-
-        let found = hat_group().place(dim, (0.0, 0.0), 1e-2);
-        assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
-    }
-
-    #[test]
-    fn test_place_into_mid_of_hat() {
-        let dim = Dim::new(43.0, 15.0, 15.0);
-        let approx_correct = Point::new(29.0, 44.0 + dim.height);
-
-        let found = hat_group().place(dim, (0.0, 0.0), 1e-2);
-        assert_approx_eq!(found, Some(approx_correct), tolerance = 0.1);
-    }
-
-    #[test]
-    fn test_place_into_bot_of_hat() {
-        let dim = Dim::new(65.0, 10.0, 2.0);
-        let approx_correct = Point::new(23.0, 83.0 + dim.height);
-
-        let found = hat_group().place(dim, (0.0, 0.0), 1e-2);
-        assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
-    }
-
-    fn hat_shape() -> BezPath {
-        shape("M65.5 27.5H21.5L29 64.5L15.5 104.5H98L80 64.5L65.5 27.5Z")
     }
 
     fn hat_group() -> PlacementGroup {
@@ -536,13 +479,72 @@ mod tests {
 
     #[test]
     fn test_build_skewed_vase_group() {
-        let shape = shape("
-            M65 100C23.5 65 59 48 16 20H52.5C90.6055 29.0694 113 66.4999 113
-            100H65Z
-        ");
-
+        let shape = skewed_vase_shape();
         let group = PlacementGroup::new(&shape, 1e-2);
         assert_eq!(group.rows.len(), 1);
         assert_eq!(group.segments.len(), 1);
+    }
+
+    #[test]
+    fn test_place_into_trapez() {
+        let shape = shape("M20 100L40 20H80L100 100H20Z");
+
+        let dim = Dim::new(50.0, 10.0, 5.0);
+        let correct = Point::new(35.0, 40.0 + dim.height);
+
+        let found = border_group(&shape).place(dim, (25.0, 0.0), 1e-2);
+        assert_approx_eq!(found, Some(correct));
+    }
+
+    #[test]
+    fn test_place_into_silo() {
+        let shape = shape("
+            M20 100C20 100 28 32 40 20C52 8.00005 66 8.5 80 20C94 31.5 100 100
+            100 100H20Z
+        ");
+
+        let dim = Dim::new(70.0, 10.0, 20.0);
+        let approx_correct = Point::new(25.0, 66.0 + dim.height);
+
+        let found = border_group(&shape).place(dim, (0.0, 0.0), 1e-2);
+        assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
+    }
+
+    #[test]
+    fn test_place_into_tailplane() {
+        let shape = shape("M38 100L16 20H52.5L113 100H38Z");
+
+        let dim = Dim::new(40.0, 10.0, 20.0);
+        let approx_correct = Point::new(31.0, 75.0 - dim.depth);
+
+        let found = border_group(&shape).place(dim, (0.0, 0.0), 1e-2);
+        assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
+    }
+
+    #[test]
+    fn test_place_into_top_of_hat() {
+        let dim = Dim::new(35.0, 15.0, 15.0);
+        let approx_correct = Point::new(28.0, 58.0 - dim.depth);
+
+        let found = hat_group().place(dim, (0.0, 0.0), 1e-2);
+        assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
+    }
+
+    #[test]
+    fn test_place_into_mid_of_hat() {
+        let dim = Dim::new(43.0, 15.0, 15.0);
+        let approx_correct = Point::new(29.0, 44.0 + dim.height);
+
+        let found = hat_group().place(dim, (0.0, 0.0), 1e-2);
+        assert_approx_eq!(found, Some(approx_correct), tolerance = 0.1);
+    }
+
+    #[test]
+    fn test_place_into_bot_of_hat() {
+        let dim = Dim::new(65.0, 10.0, 2.0);
+        let approx_correct = Point::new(23.0, 83.0 + dim.height);
+
+        let found = hat_group().place(dim, (0.0, 0.0), 1e-2);
+        assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
     }
 }
