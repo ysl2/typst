@@ -9,18 +9,31 @@ use super::{
 /// of bezier shapes.
 #[derive(Debug, Clone)]
 pub struct PlacementGroup {
-    /// The segment in the order they should be tried in.
+    /// The rows and their subslice position in `segments`.
+    rows: Vec<PlacementRow>,
+    /// The segment row-by-row.
     segments: Vec<PlacementSegment>,
+}
+
+/// A top- and bot-bounded row of segments.
+#[derive(Debug, Clone)]
+struct PlacementRow {
+    /// The y-coordinate of the top end of the segment.
+    top: f64,
+    /// The y-coordinate of the bottom end of the segment.
+    bot: f64,
+    /// The start index of the segments making up this row.
+    start: usize,
+    /// The end index of the segments making up this row.
+    end: usize,
 }
 
 /// A width-monotonic segment defined by a left and right border.
 #[derive(Debug, Clone)]
 struct PlacementSegment {
     /// The left border of the segment.
-    /// (Start point is at the top, end point at the bottom)
     left: PathSeg,
     /// The right border of the segment.
-    /// (Start point is at the top, end point at the bottom)
     right: PathSeg,
 }
 
@@ -30,38 +43,55 @@ impl PlacementGroup {
     /// The tolerance is used to determine whether two `y` coordinates can be
     /// considered equal or whether a row has to be created between them.
     pub fn new(path: &BezPath, tolerance: f64) -> PlacementGroup {
-        // TODO: Also split at intersections.
+        let mut rows = vec![];
+        let mut segments = vec![];
+
         let (monotonics, splits) = split_monotonics(path, tolerance);
-        let border_rows = split_rows(&monotonics, &splits, tolerance);
-        let _rows: Vec<Vec<_>> = border_rows.into_iter().map(|mut row| {
-            row.sort_by(|a, b| value_no_nans(
+        // TODO: Also split at intersections.
+
+        let border_rows = split_into_rows(&monotonics, &splits, tolerance);
+
+        for mut borders in border_rows {
+            borders.sort_by(|a, b| value_no_nans(
                 &a.start().midpoint(a.end()).x,
                 &b.start().midpoint(b.end()).x,
             ));
 
-            row.chunks_exact(2)
-                .map(|c| PlacementSegment { left: c[0], right: c[1] })
-                .collect()
-        }).collect();
+            let top = borders[0].start().y;
+            let bot = borders[0].end().y;
+            let start = segments.len();
 
-        todo!()
+            for c in borders.chunks_exact(2) {
+                segments.push(PlacementSegment { left: c[0], right: c[1] });
+            }
+
+            let end = segments.len();
+            rows.push(PlacementRow { top, bot, start, end });
+        }
+
+        PlacementGroup { rows, segments }
     }
 
-    /// Finds the top-most position in the group to place an object with
-    /// dimensions `dim`. Returns the origin point for the object.
+    /// Finds the top-and-left-most position in the group to place an object
+    /// with dimensions `dim`. Returns the origin point for the object.
     ///
     /// The point is selected such that:
-    /// - An object with dimensions `dim` fits at that baseline anchor point
+    /// - An object with dimensions `dim` can be placed at that origin point
     ///   without colliding with any of the shapes in the group.
-    /// - The whole object is placed below `top`
-    ///   (that is `point.y - dim.height >= top`).
-    pub fn place(&self, dim: Dim, _top: f64, tolerance: f64) -> Option<Point> {
-        search_place(&self.segments, dim, tolerance)
+    /// - The returned point `p` lies to the right and bottom of `min` (`p.x >=
+    ///   min.x` and `p.y >= min.y`).
+    pub fn place(
+        &self,
+        dim: Dim,
+        min: impl Into<Point>,
+        tolerance: f64,
+    ) -> Option<Point> {
+        search_place(&self.segments, dim, min.into(), tolerance)
     }
 }
 
-/// Split the path into monotonic subsegments and return alongside all
-/// y-coordinates at which curves start, end or were splitted.
+/// Split the path into monotonic subsegments and return them and alongside all
+/// y-coordinates at which subsegments start and end.
 fn split_monotonics(path: &BezPath, tolerance: f64) -> (Vec<PathSeg>, Vec<f64>) {
     let mut monotonics = vec![];
     let mut splits = vec![];
@@ -90,12 +120,13 @@ fn split_monotonics(path: &BezPath, tolerance: f64) -> (Vec<PathSeg>, Vec<f64>) 
 
 /// Split monotonics segments into rows of subsegments such that no segment
 /// crosses a vertical split.
-fn split_rows(
+fn split_into_rows(
     monotonics: &[PathSeg],
     splits: &[f64],
     tolerance: f64
 ) -> Vec<Vec<PathSeg>> {
-    let mut rows = vec![vec![]; splits.len() - 1];
+    let len = splits.len();
+    let mut rows = vec![vec![]; if len > 0 { len - 1 } else { 0 }];
 
     // Split curves at y values.
     for &seg in monotonics {
@@ -138,6 +169,9 @@ fn split_rows(
         }
     }
 
+    // Delete empty rows.
+    rows.retain(|r| !r.is_empty());
+
     rows
 }
 
@@ -145,6 +179,7 @@ fn split_rows(
 fn search_place(
     segments: &[PlacementSegment],
     dim: Dim,
+    _min: Point,
     tolerance: f64,
 ) -> Option<Point> {
     for (f, first) in segments.iter().enumerate() {
@@ -251,13 +286,14 @@ fn search_bisect(
     };
 
     let (top_left_x, _, mut top_width) = lrxw_at_y(top);
-    let (_,          _, mut bot_width) = lrxw_at_y(bot);
 
     // If it already fits at the top, we're good.
     if dim.width <= top_width {
         println!("info: fits at the top");
         return Some(Point::new(top_left_x, top));
     }
+
+    let (_,          _, mut bot_width) = lrxw_at_y(bot);
 
     // If it does not fit at the top and also not at the bottom, it won't
     // fit at all, since the width function is monotonous.
@@ -359,18 +395,6 @@ mod tests {
         BezPath::from_svg(path).unwrap()
     }
 
-    fn border_group(shape: &BezPath) -> PlacementGroup {
-        let curves: Vec<_> = shape.segments().collect();
-        PlacementGroup {
-            segments: vec![
-                PlacementSegment {
-                    left: curves[0].reverse(),
-                    right: curves[2],
-                },
-            ],
-        }
-    }
-
     #[test]
     fn test_place_into_trapez() {
         let shape = shape("M20 100L40 20H80L100 100H20Z");
@@ -378,7 +402,7 @@ mod tests {
         let dim = Dim::new(50.0, 10.0, 5.0);
         let correct = Point::new(35.0, 40.0 + dim.height);
 
-        let found = border_group(&shape).place(dim, 25.0, 1e-2);
+        let found = border_group(&shape).place(dim, (25.0, 0.0), 1e-2);
         assert_approx_eq!(found, Some(correct));
     }
 
@@ -392,7 +416,7 @@ mod tests {
         let dim = Dim::new(70.0, 10.0, 20.0);
         let approx_correct = Point::new(25.0, 66.0 + dim.height);
 
-        let found = border_group(&shape).place(dim, 0.0, 1e-2);
+        let found = border_group(&shape).place(dim, (0.0, 0.0), 1e-2);
         assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
     }
 
@@ -403,7 +427,49 @@ mod tests {
         let dim = Dim::new(40.0, 10.0, 20.0);
         let approx_correct = Point::new(31.0, 75.0 - dim.depth);
 
-        let found = border_group(&shape).place(dim, 0.0, 1e-2);
+        let found = border_group(&shape).place(dim, (0.0, 0.0), 1e-2);
+        assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
+    }
+
+    fn border_group(shape: &BezPath) -> PlacementGroup {
+        let curves: Vec<_> = shape.segments().collect();
+        let left = curves[0].reverse();
+        let right = curves[2];
+        PlacementGroup {
+            rows: vec![PlacementRow {
+                top: left.start().y,
+                bot: left.end().y,
+                start: 0,
+                end: 1,
+            }],
+            segments: vec![PlacementSegment { left, right }],
+        }
+    }
+
+    #[test]
+    fn test_place_into_top_of_hat() {
+        let dim = Dim::new(35.0, 15.0, 15.0);
+        let approx_correct = Point::new(28.0, 58.0 - dim.depth);
+
+        let found = hat_group().place(dim, (0.0, 0.0), 1e-2);
+        assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
+    }
+
+    #[test]
+    fn test_place_into_mid_of_hat() {
+        let dim = Dim::new(43.0, 15.0, 15.0);
+        let approx_correct = Point::new(29.0, 44.0 + dim.height);
+
+        let found = hat_group().place(dim, (0.0, 0.0), 1e-2);
+        assert_approx_eq!(found, Some(approx_correct), tolerance = 0.1);
+    }
+
+    #[test]
+    fn test_place_into_bot_of_hat() {
+        let dim = Dim::new(65.0, 10.0, 2.0);
+        let approx_correct = Point::new(23.0, 83.0 + dim.height);
+
+        let found = hat_group().place(dim, (0.0, 0.0), 1e-2);
         assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
     }
 
@@ -414,55 +480,69 @@ mod tests {
     fn hat_group() -> PlacementGroup {
         let shape = hat_shape();
         let curves: Vec<_> = shape.segments().collect();
+
+        let left1  = curves[1];
+        let right1 = curves[5].reverse();
+        let left2  = curves[2];
+        let right2 = curves[4].reverse();
+
         PlacementGroup {
+            rows: vec![
+                PlacementRow {
+                    top: left1.start().y,
+                    bot: left1.end().y,
+                    start: 0,
+                    end: 1,
+                },
+                PlacementRow {
+                    top: left2.start().y,
+                    bot: left2.end().y,
+                    start: 1,
+                    end: 2,
+                },
+            ],
             segments: vec![
-                PlacementSegment {
-                    left: curves[1],
-                    right: curves[5].reverse(),
-                },
-                PlacementSegment {
-                    left: curves[2],
-                    right: curves[4].reverse(),
-                },
-            ]
+                PlacementSegment { left: left1, right: right1 },
+                PlacementSegment { left: left2, right: right2 },
+            ],
         }
     }
 
     #[test]
-    fn test_place_into_top_of_hat() {
-        let dim = Dim::new(35.0, 15.0, 15.0);
-        let approx_correct = Point::new(28.0, 58.0 - dim.depth);
-
-        let found = hat_group().place(dim, 0.0, 1e-2);
-        assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
-    }
-
-    #[test]
-    fn test_place_into_mid_of_hat() {
-        let dim = Dim::new(43.0, 15.0, 15.0);
-        let approx_correct = Point::new(29.0, 44.0 + dim.height);
-
-        let found = hat_group().place(dim, 0.0, 1e-2);
-        assert_approx_eq!(found, Some(approx_correct), tolerance = 0.1);
-    }
-
-    #[test]
-    fn test_place_into_bot_of_hat() {
-        let dim = Dim::new(65.0, 10.0, 2.0);
-        let approx_correct = Point::new(23.0, 83.0 + dim.height);
-
-        let found = hat_group().place(dim, 0.0, 1e-2);
-        assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
-    }
-
-    #[test]
-    fn test_build_banner_collider() {
+    fn test_build_banner_group() {
         let shape = shape("
             M29.0452 86.5001C27.5159 93.9653 26.1564 102.373 25 111.793L13
             19H106.5L100.5 111.793C99.5083 103.022 97.8405 94.485 95.65
             86.5C81.4874 34.8747 45.4731 6.3054 29.0452 86.5001Z
         ");
 
-        let _ = PlacementGroup::new(&shape, 1e-2);
+        let group = PlacementGroup::new(&shape, 1e-2);
+        assert_eq!(group.rows.len(), 3);
+        assert_eq!(group.segments.len(), 5);
+    }
+
+    #[test]
+    fn test_build_strange_tower_group() {
+        let shape = shape("
+            M72 26H28C28 26 36.2035 48.2735 35.5 63C34.7133 79.4679 22 103 22
+            103H49.5V63L74.5 81.5V103H104.5C104.5 103 91.2926 90.5292 80.5
+            64.5C72 44 72 26 72 26Z
+        ");
+
+        let group = PlacementGroup::new(&shape, 1e-2);
+        assert_eq!(group.rows.len(), 5);
+        assert_eq!(group.segments.len(), 8);
+    }
+
+    #[test]
+    fn test_build_skewed_vase_group() {
+        let shape = shape("
+            M65 100C23.5 65 59 48 16 20H52.5C90.6055 29.0694 113 66.4999 113
+            100H65Z
+        ");
+
+        let group = PlacementGroup::new(&shape, 1e-2);
+        assert_eq!(group.rows.len(), 1);
+        assert_eq!(group.segments.len(), 1);
     }
 }
