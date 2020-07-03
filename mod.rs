@@ -3,17 +3,17 @@
 #[macro_use]
 mod approx;
 mod bez;
+mod collision;
 mod dim;
 mod flex;
 mod range;
 mod scale;
 
-pub mod collision;
-
 use std::cmp::Ordering;
 
 pub use approx::{ApproxEq, value_approx};
 pub use bez::ParamCurveSolve;
+pub use collision::PlacementGroup;
 pub use dim::{Dim, VDim};
 pub use flex::Flex;
 pub use range::{Range, Region};
@@ -38,10 +38,9 @@ pub mod roots {
 }
 
 pub use kurbo::{
-    Affine, BezPath, Circle, CubicBez, Ellipse, Insets, Line,
-    LineIntersection, Point, QuadBez, Rect, RoundedRect, Size, TranslateScale,
-    Vec2, PathEl, PathSeg, SvgParseError, ParamCurve,
-    ParamCurveExtrema, Shape,
+    Affine, BezPath, Circle, CubicBez, Ellipse, Insets, Line, PathEl, PathSeg,
+    ParamCurve, ParamCurveExtrema, Point, QuadBez, Rect, RoundedRect, Shape,
+    Size, SvgParseError, TranslateScale, Vec2,
 };
 
 /// A comparison function for partial orderings which panics with

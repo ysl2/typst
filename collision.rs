@@ -1,8 +1,8 @@
 //! Collisionless placement of objects.
 
 use super::{
-    max, min, value_no_nans, value_approx, ApproxEq, BezPath, Dim,
-    Point, PathSeg, ParamCurve, ParamCurveExtrema, ParamCurveSolve,
+    max, min, value_no_nans, value_approx, ApproxEq, BezPath,
+    PathSeg, ParamCurve, ParamCurveExtrema, ParamCurveSolve, Point, Size,
 };
 
 /// A data structure for fast, collisionless placement of objects into a group
@@ -73,20 +73,23 @@ impl PlacementGroup {
     }
 
     /// Finds the top-and-left-most position in the group to place an object
-    /// with dimensions `dim`. Returns the origin point for the object.
+    /// with the given `size`.
     ///
-    /// The point is selected such that:
-    /// - An object with dimensions `dim` can be placed at that origin point
-    ///   without colliding with any of the shapes in the group.
+    /// Specifically, the following guarantees are made:
+    /// - When an object with the given `size` is placed such that its top-left
+    ///   corner coincides with the point, it does not collide with any shape
+    ///   in this group.
     /// - The returned point `p` lies to the right and bottom of `min` (`p.x >=
     ///   min.x` and `p.y >= min.y`).
+    /// - There exists no point further to the left or to the top for which the
+    ///   previous two guarantees are fulfilled.
     pub fn place(
         &self,
-        dim: Dim,
-        min: impl Into<Point>,
+        min: Point,
+        size: Size,
         tolerance: f64,
     ) -> Option<Point> {
-        search_place(&self.segments, dim, min.into(), tolerance)
+        search_place(&self.segments, min, size, tolerance)
     }
 }
 
@@ -123,7 +126,7 @@ fn split_monotonics(path: &BezPath, tolerance: f64) -> (Vec<PathSeg>, Vec<f64>) 
 fn split_into_rows(
     monotonics: &[PathSeg],
     splits: &[f64],
-    tolerance: f64
+    tolerance: f64,
 ) -> Vec<Vec<PathSeg>> {
     let len = splits.len();
     let mut rows = vec![vec![]; if len > 0 { len - 1 } else { 0 }];
@@ -178,19 +181,19 @@ fn split_into_rows(
 /// Search for the top-most position in the first possible segment.
 fn search_place(
     segments: &[PlacementSegment],
-    dim: Dim,
     _min: Point,
+    size: Size,
     tolerance: f64,
 ) -> Option<Point> {
     for (f, first) in segments.iter().enumerate() {
-        let mut top = first.top() + dim.height;
-        let first_max_bot = first.bot() + dim.height;
+        let mut top = first.top();
+        let first_max_bot = first.bot();
 
         for (l, last) in segments.iter().enumerate().skip(f) {
             // The real top and bottom ends of the search interval for the
             // object's origin point are inset by the height and depth of
             // the object - lower or higher would make the object stick out.
-            let last_max_bot  = last.bot() - dim.depth;
+            let last_max_bot = last.bot() - size.height;
             let bot = min(first_max_bot, last_max_bot);
 
             // If the object is higher than the available space, it cannot
@@ -201,7 +204,7 @@ fn search_place(
             }
 
             let segments = &segments[f ..= l];
-            let found = search_bisect(dim, top, bot, segments, tolerance);
+            let found = search_bisect(size, top, bot, segments, tolerance);
             if found.is_some() {
                 return found;
             }
@@ -220,17 +223,17 @@ fn search_place(
     None
 }
 
-/// Search for a vertical position to place an object with dimensions `dim`
-/// at origin positions between `top` and `bot`.
+/// Search for a vertical position to place an object with the given `size` at
+/// positions between `top` and `bot`.
 ///
 /// At least one segment must be given.
 ///
-/// The top end of the object must fall into the first segment and the bot
-/// end into last segment for all values between `top` and `bot`. As a
-/// consequence, all inner segments are fully filled by the object,
+/// The top end of the object must fall into the first segment and the bot end
+/// into the last segment for all values between `top` and `bot`. As a
+/// consequence, all inner segments are always completely filled by the object,
 /// vertically.
 fn search_bisect(
-    dim: Dim,
+    size: Size,
     mut top: f64,
     mut bot: f64,
     segments: &[PlacementSegment],
@@ -243,14 +246,14 @@ fn search_bisect(
     let mid   = &segments[1 .. (len - 1).max(1)];
     let last  = &segments[len - 1];
 
-    assert!(top + dim.depth >= last.top(), "does not end in last segment");
-    assert!(bot - dim.height <= first.bot(), "does not start in first segment");
+    assert!(bot <= first.bot(), "does not start in first segment");
+    assert!(top + size.height >= last.top(), "does not end in last segment");
 
     // The offset from the origin point to the corner (top or bottom) at which
     // the curve is tighter. The bool `widening` should be true when the curve
     // is widening the segment from with growing y-value.
     let tightest_offset = |widening: bool| -> f64 {
-        if widening { -dim.height } else { dim.depth }
+        if widening { 0.0 } else { size.height }
     };
 
     let left_first_offset  = tightest_offset(first.left_widening());
@@ -288,7 +291,7 @@ fn search_bisect(
     let (top_left_x, _, mut top_width) = lrxw_at_y(top);
 
     // If it already fits at the top, we're good.
-    if dim.width <= top_width {
+    if size.width <= top_width {
         println!("info: fits at the top");
         return Some(Point::new(top_left_x, top));
     }
@@ -297,7 +300,7 @@ fn search_bisect(
 
     // If it does not fit at the top and also not at the bottom, it won't
     // fit at all, since the width function is monotonous.
-    if dim.width > bot_width {
+    if size.width > bot_width {
         println!("info: object is too wide");
         return None;
     }
@@ -306,19 +309,19 @@ fn search_bisect(
     loop {
         // Determine the next `y` value by linear interpolation between the
         // min and max bounds.
-        let ratio = (dim.width - top_width) / (bot_width - top_width);
+        let ratio = (size.width - top_width) / (bot_width - top_width);
         let y = top + ratio * (bot - top);
         let (left_x, _, width) = lrxw_at_y(y);
 
         // Check whether we converged to a good spot.
-        if width.approx_eq(&dim.width, tolerance) {
+        if width.approx_eq(&size.width, tolerance) {
             println!("info: converged in {}. iteration", iter);
             return Some(Point::new(left_x, y));
         }
 
         // Adjust the bounds by replacing the bad bound with the better
         // estimate.
-        if dim.width < width {
+        if size.width < width {
             bot = y;
             bot_width = width;
         } else {
@@ -380,14 +383,11 @@ impl PlacementSegment {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{BezPath, Rect, Vec2};
+    use super::super::{BezPath, Rect};
     use super::*;
 
-    fn _boxed(point: Point, dim: Dim) -> Rect {
-        Rect::from_points(
-            point - Vec2::new(0.0, dim.height),
-            point + Vec2::new(dim.width, dim.depth),
-        )
+    fn _boxed(point: Point, size: Size) -> Rect {
+        Rect::from_points(point, point + size.to_vec2())
     }
 
     fn shape(path: &str) -> BezPath {
@@ -452,13 +452,20 @@ mod tests {
     }
 
     #[test]
+    fn test_build_skewed_vase_group() {
+        let shape = skewed_vase_shape();
+        let group = PlacementGroup::new(&shape, 1e-2);
+        assert_eq!(group.rows.len(), 1);
+        assert_eq!(group.segments.len(), 1);
+    }
+
+    #[test]
     fn test_build_banner_group() {
         let shape = shape("
             M29.0452 86.5001C27.5159 93.9653 26.1564 102.373 25 111.793L13
             19H106.5L100.5 111.793C99.5083 103.022 97.8405 94.485 95.65
             86.5C81.4874 34.8747 45.4731 6.3054 29.0452 86.5001Z
         ");
-
         let group = PlacementGroup::new(&shape, 1e-2);
         assert_eq!(group.rows.len(), 3);
         assert_eq!(group.segments.len(), 5);
@@ -471,29 +478,19 @@ mod tests {
             103H49.5V63L74.5 81.5V103H104.5C104.5 103 91.2926 90.5292 80.5
             64.5C72 44 72 26 72 26Z
         ");
-
         let group = PlacementGroup::new(&shape, 1e-2);
         assert_eq!(group.rows.len(), 5);
         assert_eq!(group.segments.len(), 8);
     }
 
     #[test]
-    fn test_build_skewed_vase_group() {
-        let shape = skewed_vase_shape();
-        let group = PlacementGroup::new(&shape, 1e-2);
-        assert_eq!(group.rows.len(), 1);
-        assert_eq!(group.segments.len(), 1);
-    }
-
-    #[test]
     fn test_place_into_trapez() {
         let shape = shape("M20 100L40 20H80L100 100H20Z");
-
-        let dim = Dim::new(50.0, 10.0, 5.0);
-        let correct = Point::new(35.0, 40.0 + dim.height);
-
-        let found = border_group(&shape).place(dim, (25.0, 0.0), 1e-2);
-        assert_approx_eq!(found, Some(correct));
+        let group = border_group(&shape);
+        assert_approx_eq!(
+            group.place(Point::ZERO, Size::new(50.0, 15.0), 1e-2),
+            Some(Point::new(35.0, 40.0)),
+        );
     }
 
     #[test]
@@ -502,49 +499,49 @@ mod tests {
             M20 100C20 100 28 32 40 20C52 8.00005 66 8.5 80 20C94 31.5 100 100
             100 100H20Z
         ");
-
-        let dim = Dim::new(70.0, 10.0, 20.0);
-        let approx_correct = Point::new(25.0, 66.0 + dim.height);
-
-        let found = border_group(&shape).place(dim, (0.0, 0.0), 1e-2);
-        assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
+        let group = border_group(&shape);
+        assert_approx_eq!(
+            group.place(Point::ZERO, Size::new(70.0, 30.0), 1e-2),
+            Some(Point::new(25.5, 65.0)),
+            tolerance = 0.5,
+        );
     }
 
     #[test]
     fn test_place_into_tailplane() {
         let shape = shape("M38 100L16 20H52.5L113 100H38Z");
-
-        let dim = Dim::new(40.0, 10.0, 20.0);
-        let approx_correct = Point::new(31.0, 75.0 - dim.depth);
-
-        let found = border_group(&shape).place(dim, (0.0, 0.0), 1e-2);
-        assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
+        let group = border_group(&shape);
+        assert_approx_eq!(
+            group.place(Point::ZERO, Size::new(40.0, 30.0), 1e-2),
+            Some(Point::new(31.0, 45.0)),
+            tolerance = 1.0,
+        );
     }
 
     #[test]
     fn test_place_into_top_of_hat() {
-        let dim = Dim::new(35.0, 15.0, 15.0);
-        let approx_correct = Point::new(28.0, 58.0 - dim.depth);
-
-        let found = hat_group().place(dim, (0.0, 0.0), 1e-2);
-        assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
+        assert_approx_eq!(
+            hat_group().place(Point::ZERO, Size::new(35.0, 30.0), 1e-2),
+            Some(Point::new(28.0, 28.0)),
+            tolerance = 1.0,
+        );
     }
 
     #[test]
     fn test_place_into_mid_of_hat() {
-        let dim = Dim::new(43.0, 15.0, 15.0);
-        let approx_correct = Point::new(29.0, 44.0 + dim.height);
-
-        let found = hat_group().place(dim, (0.0, 0.0), 1e-2);
-        assert_approx_eq!(found, Some(approx_correct), tolerance = 0.1);
+        assert_approx_eq!(
+            hat_group().place(Point::ZERO, Size::new(43.0, 30.0), 1e-2),
+            Some(Point::new(29.0, 44.0)),
+            tolerance = 0.1,
+        );
     }
 
     #[test]
     fn test_place_into_bot_of_hat() {
-        let dim = Dim::new(65.0, 10.0, 2.0);
-        let approx_correct = Point::new(23.0, 83.0 + dim.height);
-
-        let found = hat_group().place(dim, (0.0, 0.0), 1e-2);
-        assert_approx_eq!(found, Some(approx_correct), tolerance = 1.0);
+        assert_approx_eq!(
+            hat_group().place(Point::ZERO, Size::new(65.0, 12.0), 1e-2),
+            Some(Point::new(23.0, 83.0)),
+            tolerance = 1.0,
+        );
     }
 }
