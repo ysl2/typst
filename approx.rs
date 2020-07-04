@@ -52,6 +52,7 @@ macro_rules! impl_approx_eq {
     };
 }
 
+impl_approx_eq!(std::ops::Range<f64> [start, end]);
 impl_approx_eq!(super::Point [x, y]);
 impl_approx_eq!(super::Vec2 [x, y]);
 impl_approx_eq!(super::Size [width, height]);

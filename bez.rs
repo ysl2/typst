@@ -20,7 +20,7 @@ use super::{
 /// This function computes many bounding boxes of curves. Since this operation
 /// is very fast for monotone curves, consider using the `Monotone` wrapper if
 /// your curves are monotone.
-pub fn intersect<C, A>(a: &C, b: &C, accuracy: f64) -> ArrayVec<A>
+pub fn intersect_curves<C, A>(a: &C, b: &C, accuracy: f64) -> ArrayVec<A>
 where
     C: ParamCurveExtrema,
     A: Array<Item=Point>,
@@ -63,10 +63,10 @@ where
         }
     };
 
-    extend(intersect(&a1, &b1, accuracy));
-    extend(intersect(&a1, &b2, accuracy));
-    extend(intersect(&a2, &b1, accuracy));
-    extend(intersect(&a2, &b2, accuracy));
+    extend(intersect_curves(&a1, &b1, accuracy));
+    extend(intersect_curves(&a1, &b2, accuracy));
+    extend(intersect_curves(&a2, &b1, accuracy));
+    extend(intersect_curves(&a2, &b2, accuracy));
 
     result
 }
@@ -329,7 +329,7 @@ mod tests {
         let b = Monotone(seg("M21 20C21 40 42.5 70 71 70"));
 
         assert_approx_eq!(
-            intersect::<_, [_; 3]>(&a, &b, 0.01).to_vec(),
+            intersect_curves::<_, [_; 3]>(&a, &b, 0.01).to_vec(),
             vec![Point::new(24.0, 34.0), Point::new(56.0, 67.0)],
             tolerance = 0.5,
         );
@@ -340,7 +340,7 @@ mod tests {
         let a = Monotone(seg("M59 81C14 74.5 37.5 31 9 31"));
         let b = Monotone(seg("M17 31C17 81 50 53 50 81"));
 
-        let mut vec = intersect::<_, [_; 3]>(&a, &b, 0.01).to_vec();
+        let mut vec = intersect_curves::<_, [_; 3]>(&a, &b, 0.01).to_vec();
         vec.sort_by(|a, b| value_no_nans(&a.y, &b.y));
 
         assert_approx_eq!(
@@ -359,7 +359,7 @@ mod tests {
         let a = seg("M53 69C82 12 -2 -11 23 69");
         let b = seg("M31 63C-71 14 187 75 11 17");
 
-        let mut vec = intersect::<_, [_; 5]>(&a, &b, 0.01).to_vec();
+        let mut vec = intersect_curves::<_, [_; 5]>(&a, &b, 0.01).to_vec();
         vec.sort_by(|a, b| value_no_nans(&a.y, &b.y));
 
         assert_approx_eq!(
@@ -380,7 +380,7 @@ mod tests {
         let a1 = seg("M53 69C82 12 -2 -11 23 69");
         let a2 = seg("M53 69C82 12 -2 -11 23 69");
 
-        let mut vec = intersect::<_, [_; 10]>(&a1, &a2, 0.01).to_vec();
+        let mut vec = intersect_curves::<_, [_; 10]>(&a1, &a2, 0.01).to_vec();
         vec.sort_by(|a, b| value_no_nans(&a.y, &b.y));
 
         assert_eq!(vec.len(), 10);

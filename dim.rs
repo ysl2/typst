@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::fmt;
-use super::Range;
+use super::range::Range;
 
 /// Dimensions (_width_ / _height_ / _depth_) of an object with baseline.
 #[derive(Default, Copy, Clone, PartialEq)]
@@ -106,7 +106,7 @@ impl VDim {
     /// The vertical range spanned by an element with this v-dim placed on the
     /// given baseline.
     pub fn v_range(self, baseline: f64) -> Range {
-        Range::new(baseline - self.height, baseline + self.depth)
+        baseline - self.height .. baseline + self.depth
     }
 }
 

@@ -6,17 +6,16 @@ mod bez;
 mod collision;
 mod dim;
 mod flex;
-mod range;
+pub mod range;
 mod scale;
 
 use std::cmp::Ordering;
 
 pub use approx::{ApproxEq, value_approx};
-pub use bez::{intersect, Monotone, ParamCurveSolve, MAX_SOLVE};
+pub use bez::{intersect_curves, Monotone, ParamCurveSolve, MAX_SOLVE};
 pub use collision::PlacementGroup;
 pub use dim::{Dim, VDim};
 pub use flex::Flex;
-pub use range::{Range, Region};
 pub use scale::Scale;
 
 /// Root-finding for polynomials up to degree 3.
@@ -48,14 +47,4 @@ pub use kurbo::{
 /// `"encountered nan in comparison"` when the comparison fails.
 pub fn value_no_nans<T: PartialOrd>(a: &T, b: &T) -> Ordering {
     a.partial_cmp(b).expect("encountered nan in comparison")
-}
-
-/// The maximum of two floats.
-pub fn max(a: f64, b: f64) -> f64 {
-    if a > b { a } else { b }
-}
-
-/// The minimum of two floats.
-pub fn min(a: f64, b: f64) -> f64 {
-    if a < b { a } else { b }
 }
