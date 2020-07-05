@@ -12,7 +12,9 @@ mod scale;
 use std::cmp::Ordering;
 
 pub use approx::{ApproxEq, value_approx};
-pub use bez::{intersect_curves, Monotone, ParamCurveSolve, MAX_SOLVE};
+pub use bez::{
+    find_intersections, Monotone, ParamCurveSolve, PathSegExt, MAX_SOLVE,
+};
 pub use collision::PlacementGroup;
 pub use dim::{Dim, VDim};
 pub use flex::Flex;

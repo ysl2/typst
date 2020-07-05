@@ -12,7 +12,10 @@ pub enum Scale<T> {
     Rel(f64),
 }
 
-impl<T> Scale<T> where T: Mul<f64, Output=T> {
+impl<T> Scale<T>
+where
+    T: Mul<f64, Output=T>
+{
     /// Returns either the absolute value or computes the relative value as a
     /// fraction of `one`.
     ///
@@ -29,7 +32,7 @@ impl<T> Scale<T> where T: Mul<f64, Output=T> {
     }
 }
 
-impl<T> ApproxEq for Scale<T> where T: ApproxEq {
+impl<T: ApproxEq> ApproxEq for Scale<T>{
     fn approx_eq(&self, other: &Self, tolerance: f64) -> bool {
         match (self, other) {
             (Scale::Abs(x), Scale::Abs(y)) => x.approx_eq(y, tolerance),

@@ -12,7 +12,7 @@ impl ApproxEq for f64 {
     }
 }
 
-impl<T> ApproxEq for Vec<T> where T: ApproxEq {
+impl<T: ApproxEq> ApproxEq for Vec<T> {
     fn approx_eq(&self, other: &Self, tolerance: f64) -> bool {
         self.len() == other.len() &&
         self.iter().zip(other)
@@ -20,7 +20,7 @@ impl<T> ApproxEq for Vec<T> where T: ApproxEq {
     }
 }
 
-impl<T> ApproxEq for [T] where T: ApproxEq {
+impl<T: ApproxEq> ApproxEq for [T] {
     fn approx_eq(&self, other: &Self, tolerance: f64) -> bool {
         self.len() == other.len() &&
         self.iter().zip(other)
@@ -28,7 +28,7 @@ impl<T> ApproxEq for [T] where T: ApproxEq {
     }
 }
 
-impl<T> ApproxEq for Option<T> where T: ApproxEq {
+impl<T: ApproxEq> ApproxEq for Option<T> {
     fn approx_eq(&self, other: &Self, tolerance: f64) -> bool {
         match (self, other) {
             (Some(x), Some(y)) => x.approx_eq(y, tolerance),
