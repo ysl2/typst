@@ -121,10 +121,10 @@ impl PlacementGroup {
                 // Walk through the horizontal ranges where an object that
                 // starts in `t` and ends in `b` can be placed (these depend
                 // also on the rows in between `t` and `b`).
-                for (r, f, l) in self.ranges(t, b) {
+                for (r, f, l) in self.ranges(t, b, min.x) {
                     // Try to place the object in the range `r`, starting in `f`
                     // and ending in `l`.
-                    let point = self.try_place_into(r, f, l, size, accuracy);
+                    let point = self.try_place_into(r, f, l, min.y, size, accuracy);
 
                     if let Some(p) = point {
                         if best.map(|b| p.y < b.y).unwrap_or(true) {
@@ -165,6 +165,7 @@ impl PlacementGroup {
         &self,
         t: usize,
         b: usize,
+        min_x: f64,
     ) -> impl Iterator<Item=(Range, &Slot, &Slot)> {
         assert!(t <= b);
 
@@ -179,7 +180,7 @@ impl PlacementGroup {
         let mut done = false;
         std::iter::from_fn(move || {
             while !done {
-                let mut start = f64::NEG_INFINITY;
+                let mut start = min_x;
                 let mut end = f64::INFINITY;
                 let mut min = None;
 
@@ -219,6 +220,7 @@ impl PlacementGroup {
         range: Range,
         first: &Slot,
         last: &Slot,
+        min_y: f64,
         size: Size,
         accuracy: f64,
     ) -> Option<Point> {
@@ -226,6 +228,8 @@ impl PlacementGroup {
         if range.end - range.start + accuracy < size.width {
             return None;
         }
+
+        let top = first.top().max(min_y);
 
         // The rectangle occupied by the object when placed at `p`.
         let rect = |p| {
@@ -260,22 +264,19 @@ impl PlacementGroup {
         // Check that the rectangle does not collide with the top & bottom end
         // of the row.
         let check_top_bot = |rect: Rect| {
-            first.top() < rect.y0 + accuracy
-            && last.bot() > rect.y1 - accuracy
+            top < rect.y0 + accuracy && last.bot() > rect.y1 - accuracy
         };
 
         // ------------------------------------------------------------------ //
         // Try placing directly at the top border.
 
         // Find out the x-position for placing at the top border.
-        let start = first.left.start();
-        let y = start.y;
         let x = range.start
-            .max(solve_max_x(&first.left, y .. y + size.height))
-            .max(solve_max_x(&last.left, y .. y + size.height));
+            .max(solve_max_x(&first.left, top .. top + size.height))
+            .max(solve_max_x(&last.left, top .. top + size.height));
 
         // If it fits at the top, it ain't getting better.
-        let point = Point::new(x, y);
+        let point = Point::new(x, top);
         if check_right(rect(point)) {
             return Some(point);
         }
@@ -318,8 +319,8 @@ impl PlacementGroup {
             }
         };
 
-        let left = range.start.max(first.left_max()).max(last.left_max());
-        let right = range.end.min(first.right_min()).max(last.right_min());
+        let left = range.start.max(first.left.end().x).max(last.left.start().x);
+        let right = range.end.min(first.right.end().x).max(last.right.start().x);
 
         check_border_mid(&first.left, right - size.width);
         check_border_mid(&(mx * first.right), left);
@@ -562,6 +563,28 @@ mod tests {
         assert_approx_eq!(
             group.place(Point::ZERO, Size::new(50.0, 15.0), 1e-2),
             Some(Point::new(35.0, 40.0)),
+            tolerance = 1e-2,
+        );
+    }
+
+    #[test]
+    fn test_place_into_trapez_with_min_x() {
+        let shape = svg("M20 100L40 20H80L100 100H20Z");
+        let group = PlacementGroup::new(&shape, 1e-2);
+        assert_approx_eq!(
+            group.place(Point::new(60.0, 30.0), Size::new(25.0, 10.0), 1e-2),
+            Some(Point::new(60.0, 40.0)),
+            tolerance = 1e-2,
+        );
+    }
+
+    #[test]
+    fn test_place_into_trapez_with_min_y() {
+        let shape = svg("M20 100L40 20H80L100 100H20Z");
+        let group = PlacementGroup::new(&shape, 1e-2);
+        assert_approx_eq!(
+            group.place(Point::new(30.0, 56.0), Size::new(30.0, 10.0), 1e-2),
+            Some(Point::new(31.0, 56.0)),
             tolerance = 1e-2,
         );
     }

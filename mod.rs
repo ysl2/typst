@@ -3,11 +3,12 @@
 #[macro_use]
 mod approx;
 mod bez;
-mod collision;
 mod dim;
 mod flex;
-pub mod range;
 mod scale;
+
+pub mod placement;
+pub mod range;
 
 use std::cmp::Ordering;
 
@@ -15,7 +16,6 @@ pub use approx::{ApproxEq, value_approx};
 pub use bez::{
     find_intersections_bbox, Monotone, ParamCurveSolve, PathSegExt, MAX_SOLVE,
 };
-pub use collision::PlacementGroup;
 pub use dim::{Dim, VDim};
 pub use flex::Flex;
 pub use range::Range;
