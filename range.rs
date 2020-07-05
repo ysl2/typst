@@ -1,4 +1,4 @@
-//! Operations on float ranges.
+//! Floating-point ranges.
 
 use super::value_no_nans;
 

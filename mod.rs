@@ -13,11 +13,12 @@ use std::cmp::Ordering;
 
 pub use approx::{ApproxEq, value_approx};
 pub use bez::{
-    find_intersections, Monotone, ParamCurveSolve, PathSegExt, MAX_SOLVE,
+    find_intersections_bbox, Monotone, ParamCurveSolve, PathSegExt, MAX_SOLVE,
 };
 pub use collision::PlacementGroup;
 pub use dim::{Dim, VDim};
 pub use flex::Flex;
+pub use range::Range;
 pub use scale::Scale;
 
 /// Root-finding for polynomials up to degree 3.

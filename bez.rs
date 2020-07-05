@@ -1,11 +1,99 @@
-use std::ops::Range;
+use std::ops::{Mul, Range};
 use arrayvec::{Array, ArrayVec};
 use super::{
     roots, Affine, ApproxEq, CubicBez, Line, ParamCurve, ParamCurveExtrema,
-    PathSeg, Point, QuadBez, Rect, MAX_EXTREMA,
+    PathSeg, Point, QuadBez, Rect, TranslateScale, MAX_EXTREMA,
 };
 
-/// Find the intersections of two curves.
+/// A wrapper for curves that are monotone in both dimensions.
+///
+/// This auto-derefs to the wrapped curve, but overrides `ParamCurveExtrema`
+/// such that bounding-box computation is accelerated.
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct Monotone<C>(pub C);
+
+impl Monotone<PathSeg> {
+    /// Reverses the path segment.
+    pub fn reverse(self) -> Self {
+        Monotone(self.0.reverse())
+    }
+
+    /// Intersects two monotone path segments, solving analytically if possible
+    /// and falling back to bounding box search if not.
+    pub fn intersect<A>(&self, other: &Self, accuracy: f64) -> ArrayVec<A>
+    where
+        A: Array<Item=Point>
+    {
+        match (self.0, other.0) {
+            (seg, PathSeg::Line(line)) | (PathSeg::Line(line), seg) => {
+                seg.intersect_line(line)
+                    .into_iter()
+                    .map(|sect| line.eval(sect.line_t))
+                    .collect()
+            }
+
+            _ => find_intersections_bbox(self, other, accuracy),
+        }
+    }
+}
+
+impl<C: ParamCurve> ParamCurve for Monotone<C> {
+    fn eval(&self, t: f64) -> Point {
+        self.0.eval(t)
+    }
+
+    fn start(&self) -> Point {
+        self.0.start()
+    }
+
+    fn end(&self) -> Point {
+        self.0.end()
+    }
+
+    fn subsegment(&self, range: Range<f64>) -> Self {
+        Monotone(self.0.subsegment(range))
+    }
+
+    fn subdivide(&self) -> (Self, Self) {
+        let (a, b) = self.0.subdivide();
+        (Monotone(a), Monotone(b))
+    }
+}
+
+impl<C: ParamCurve> ParamCurveExtrema for Monotone<C> {
+    fn extrema(&self) -> ArrayVec<[f64; MAX_EXTREMA]> {
+        ArrayVec::new()
+    }
+
+    fn extrema_ranges(&self) -> ArrayVec<[Range<f64>; 5]> {
+        let mut result = ArrayVec::new();
+        result.push(0.0 .. 1.0);
+        result
+    }
+
+    fn bounding_box(&self) -> Rect {
+        Rect::from_points(self.start(), self.end())
+    }
+}
+
+impl Mul<Monotone<PathSeg>> for TranslateScale {
+    type Output = Monotone<PathSeg>;
+
+    #[inline]
+    fn mul(self, other: Monotone<PathSeg>) -> Monotone<PathSeg> {
+        Monotone(other.0.apply_translate_scale(self))
+    }
+}
+
+impl<C> std::ops::Deref for Monotone<C> {
+    type Target = C;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// Find the intersections of two curves recursively using bounding boxes.
 ///
 /// The points are in no particular order. No guarantees are made about which
 /// points are returned when the curves have coinciding segments.
@@ -20,7 +108,7 @@ use super::{
 /// This function computes many bounding boxes of curves. Since this operation
 /// is very fast for monotone curves, consider using the `Monotone` wrapper if
 /// your curves are monotone.
-pub fn find_intersections<C, A>(a: &C, b: &C, accuracy: f64) -> ArrayVec<A>
+pub fn find_intersections_bbox<C, A>(a: &C, b: &C, accuracy: f64) -> ArrayVec<A>
 where
     C: ParamCurveExtrema,
     A: Array<Item=Point>,
@@ -65,66 +153,12 @@ where
         }
     };
 
-    extend(find_intersections(&a1, &b1, accuracy));
-    extend(find_intersections(&a1, &b2, accuracy));
-    extend(find_intersections(&a2, &b1, accuracy));
-    extend(find_intersections(&a2, &b2, accuracy));
+    extend(find_intersections_bbox(&a1, &b1, accuracy));
+    extend(find_intersections_bbox(&a1, &b2, accuracy));
+    extend(find_intersections_bbox(&a2, &b1, accuracy));
+    extend(find_intersections_bbox(&a2, &b2, accuracy));
 
     result
-}
-
-/// A wrapper for curves that are monotone in both dimensions.
-///
-/// This auto-derefs to the wrapped curve, but overrides `ParamCurveExtrema`
-/// such that bounding-box computation is accelerated.
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub struct Monotone<C>(pub C);
-
-impl<C: ParamCurve> ParamCurve for Monotone<C> {
-    fn eval(&self, t: f64) -> Point {
-        self.0.eval(t)
-    }
-
-    fn start(&self) -> Point {
-        self.0.start()
-    }
-
-    fn end(&self) -> Point {
-        self.0.end()
-    }
-
-    fn subsegment(&self, range: Range<f64>) -> Self {
-        Monotone(self.0.subsegment(range))
-    }
-
-    fn subdivide(&self) -> (Self, Self) {
-        let (a, b) = self.0.subdivide();
-        (Monotone(a), Monotone(b))
-    }
-}
-
-impl<C: ParamCurve> ParamCurveExtrema for Monotone<C> {
-    fn extrema(&self) -> ArrayVec<[f64; MAX_EXTREMA]> {
-        ArrayVec::new()
-    }
-
-    fn extrema_ranges(&self) -> ArrayVec<[Range<f64>; 5]> {
-        let mut result = ArrayVec::new();
-        result.push(0.0 .. 1.0);
-        result
-    }
-
-    fn bounding_box(&self) -> Rect {
-        Rect::from_points(self.start(), self.end())
-    }
-}
-
-impl<C> std::ops::Deref for Monotone<C> {
-    type Target = C;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
 }
 
 /// A parameterized curve that can solve its `t` values for a coordinate value.
@@ -184,6 +218,26 @@ impl ParamCurveSolve for CubicBez {
     }
 }
 
+impl ParamCurveSolve for QuadBez {
+    fn solve_t_for_x(&self, x: f64) -> ArrayVec<[f64; MAX_SOLVE]> {
+        solve_quad_t_for_v(self.p0.x, self.p1.x, self.p2.x, x)
+    }
+
+    fn solve_t_for_y(&self, y: f64) -> ArrayVec<[f64; MAX_SOLVE]> {
+        solve_quad_t_for_v(self.p0.y, self.p1.y, self.p2.y, y)
+    }
+}
+
+impl ParamCurveSolve for Line {
+    fn solve_t_for_x(&self, x: f64) -> ArrayVec<[f64; MAX_SOLVE]> {
+        solve_line_t_for_v(self.p0.x, self.p1.x, x)
+    }
+
+    fn solve_t_for_y(&self, y: f64) -> ArrayVec<[f64; MAX_SOLVE]> {
+        solve_line_t_for_v(self.p0.y, self.p1.y, y)
+    }
+}
+
 /// Find all `t` values where the cubic curve has the given `v` value in the
 /// dimension for which the control values are given.
 fn solve_cubic_t_for_v(
@@ -197,18 +251,7 @@ fn solve_cubic_t_for_v(
     let c2 = 3.0 * p0 - 6.0 * p1 + 3.0 * p2;
     let c1 = -3.0 * p0 + 3.0 * p1;
     let c0 = p0 - v;
-
     filter_t(roots::solve_cubic(c0, c1, c2, c3))
-}
-
-impl ParamCurveSolve for QuadBez {
-    fn solve_t_for_x(&self, x: f64) -> ArrayVec<[f64; MAX_SOLVE]> {
-        solve_quad_t_for_v(self.p0.x, self.p1.x, self.p2.x, x)
-    }
-
-    fn solve_t_for_y(&self, y: f64) -> ArrayVec<[f64; MAX_SOLVE]> {
-        solve_quad_t_for_v(self.p0.y, self.p1.y, self.p2.y, y)
-    }
 }
 
 /// Find all `t` values matching `v` for a quadratic curve.
@@ -221,18 +264,7 @@ fn solve_quad_t_for_v(
     let c2 = p0 - 2.0 * p1 + p2;
     let c1 = -2.0 * p0 + 2.0 * p1;
     let c0 = p0 - v;
-
     filter_t(roots::solve_quadratic(c0, c1, c2))
-}
-
-impl ParamCurveSolve for Line {
-    fn solve_t_for_x(&self, x: f64) -> ArrayVec<[f64; MAX_SOLVE]> {
-        solve_line_t_for_v(self.p0.x, self.p1.x, x)
-    }
-
-    fn solve_t_for_y(&self, y: f64) -> ArrayVec<[f64; MAX_SOLVE]> {
-        solve_line_t_for_v(self.p0.y, self.p1.y, y)
-    }
 }
 
 /// Find all `t` values matching `v` for a linear curve.
@@ -243,7 +275,6 @@ fn solve_line_t_for_v(
 ) -> ArrayVec<[f64; MAX_SOLVE]> {
     let c1 = -p0 + p1;
     let c0 = p0 - v;
-
     filter_t(roots::solve_linear(c0, c1))
 }
 
@@ -258,6 +289,7 @@ fn filter_t(vec: ArrayVec<impl Array<Item=f64>>) -> ArrayVec<[f64; MAX_SOLVE]> {
 /// Additional methods for path segments.
 pub trait PathSegExt {
     fn apply_affine(self, affine: Affine) -> Self;
+    fn apply_translate_scale(self, ts: TranslateScale) -> Self;
 }
 
 impl PathSegExt for PathSeg {
@@ -266,6 +298,14 @@ impl PathSegExt for PathSeg {
             PathSeg::Line(line) => PathSeg::Line(affine * line),
             PathSeg::Quad(quad) => PathSeg::Quad(affine * quad),
             PathSeg::Cubic(cubic) => PathSeg::Cubic(affine * cubic),
+        }
+    }
+
+    fn apply_translate_scale(self, ts: TranslateScale) -> PathSeg {
+        match self {
+            PathSeg::Line(line) => PathSeg::Line(ts * line),
+            PathSeg::Quad(quad) => PathSeg::Quad(ts * quad),
+            PathSeg::Cubic(cubic) => PathSeg::Cubic(ts * cubic),
         }
     }
 }
@@ -346,7 +386,7 @@ mod tests {
         let b = Monotone(seg("M21 20C21 40 42.5 70 71 70"));
 
         assert_approx_eq!(
-            find_intersections::<_, [_; 3]>(&a, &b, 0.01).to_vec(),
+            a.intersect::<[_; 3]>(&b, 0.01).to_vec(),
             vec![Point::new(24.0, 34.0), Point::new(56.0, 67.0)],
             tolerance = 0.5,
         );
@@ -357,7 +397,7 @@ mod tests {
         let a = Monotone(seg("M59 81C14 74.5 37.5 31 9 31"));
         let b = Monotone(seg("M17 31C17 81 50 53 50 81"));
 
-        let mut vec = find_intersections::<_, [_; 3]>(&a, &b, 0.01).to_vec();
+        let mut vec = a.intersect::<[_; 3]>(&b, 0.01).to_vec();
         vec.sort_by(|a, b| value_no_nans(&a.y, &b.y));
 
         assert_approx_eq!(
@@ -376,7 +416,7 @@ mod tests {
         let a = seg("M53 69C82 12 -2 -11 23 69");
         let b = seg("M31 63C-71 14 187 75 11 17");
 
-        let mut vec = find_intersections::<_, [_; 5]>(&a, &b, 0.01).to_vec();
+        let mut vec = find_intersections_bbox::<_, [_; 5]>(&a, &b, 0.01).to_vec();
         vec.sort_by(|a, b| value_no_nans(&a.y, &b.y));
 
         assert_approx_eq!(
@@ -397,9 +437,7 @@ mod tests {
         let a1 = seg("M53 69C82 12 -2 -11 23 69");
         let a2 = seg("M53 69C82 12 -2 -11 23 69");
 
-        let mut vec = find_intersections::<_, [_; 10]>(&a1, &a2, 0.01).to_vec();
-        vec.sort_by(|a, b| value_no_nans(&a.y, &b.y));
-
+        let vec = find_intersections_bbox::<_, [_; 10]>(&a1, &a2, 0.01).to_vec();
         assert_eq!(vec.len(), 10);
     }
 }

@@ -2,11 +2,10 @@
 
 use arrayvec::ArrayVec;
 use std::cmp::Ordering;
-use std::ops::Range;
 use super::{
-    find_intersections, value_no_nans, value_approx, Affine, ApproxEq,
-    BezPath, Monotone, PathSeg, PathSegExt, ParamCurve, ParamCurveExtrema,
-    ParamCurveSolve, Point, Rect, Size,
+    value_no_nans, value_approx, ApproxEq, BezPath, Monotone, PathSeg,
+    ParamCurve, ParamCurveExtrema, ParamCurveSolve, Point, Range, Rect, Size,
+    TranslateScale, Vec2,
 };
 
 /// A data structure for fast, collisionless placement of objects into a group
@@ -27,7 +26,7 @@ struct Row {
     /// The y-coordinate of the bottom end of the segment.
     bot: f64,
     /// Which slots belong to this row.
-    idxs: Range<usize>,
+    idxs: std::ops::Range<usize>,
 }
 
 /// A slot defined by a left and right border.
@@ -166,7 +165,7 @@ impl PlacementGroup {
         &self,
         t: usize,
         b: usize,
-    ) -> impl Iterator<Item=(Range<f64>, &Slot, &Slot)> {
+    ) -> impl Iterator<Item=(Range, &Slot, &Slot)> {
         assert!(t <= b);
 
         let mut ts = self.slots(t);
@@ -184,7 +183,7 @@ impl PlacementGroup {
                 let mut end = f64::INFINITY;
                 let mut min = None;
 
-                let mut check = |r: Range<f64>, v| {
+                let mut check = |r: Range, v| {
                     start = start.max(r.start);
                     if r.end < end {
                         min = Some(v);
@@ -217,13 +216,128 @@ impl PlacementGroup {
     /// ending in slot `l`.
     fn try_place_into(
         &self,
-        range: Range<f64>,
+        range: Range,
         first: &Slot,
         last: &Slot,
         size: Size,
         accuracy: f64,
     ) -> Option<Point> {
-        todo!("try_place_into")
+        // The object cannot fit if the range is not wide enough.
+        if range.end - range.start + accuracy < size.width {
+            return None;
+        }
+
+        // The rectangle occupied by the object when placed at `p`.
+        let rect = |p| {
+            Rect::from_points(p, p + size.to_vec2())
+                .inset((-2.0 * accuracy, 0.0))
+        };
+
+        let solve_max_x = |seg: &Monotone<PathSeg>, range: Range| {
+            solve_one_x(seg, range.start, accuracy)
+                .max(solve_one_x(seg, range.end, accuracy))
+        };
+
+        let solve_min_x = |seg: &Monotone<PathSeg>, range: Range| {
+            solve_one_x(seg, range.start, accuracy)
+                .min(solve_one_x(seg, range.end, accuracy))
+        };
+
+        // Check that the rectangle does not collide with the left borders.
+        let check_left = |rect: Rect| {
+            rect.x0 > range.start
+            && rect.x0 > solve_max_x(&first.left, rect.y0 .. rect.y1)
+            && rect.x0 > solve_max_x(&last.left, rect.y0 .. rect.y1)
+        };
+
+        // Check that the rectangle does not collide with the right borders.
+        let check_right = |rect: Rect| {
+            rect.x1 < range.end
+            && rect.x1 < solve_min_x(&first.right, rect.y0 .. rect.y1)
+            && rect.x1 < solve_min_x(&last.right, rect.y0 .. rect.y1)
+        };
+
+        // Check that the rectangle does not collide with the top & bottom end
+        // of the row.
+        let check_top_bot = |rect: Rect| {
+            first.top() < rect.y0 + accuracy
+            && last.bot() > rect.y1 - accuracy
+        };
+
+        // ------------------------------------------------------------------ //
+        // Try placing directly at the top border.
+
+        // Find out the x-position for placing at the top border.
+        let start = first.left.start();
+        let y = start.y;
+        let x = range.start
+            .max(solve_max_x(&first.left, y .. y + size.height))
+            .max(solve_max_x(&last.left, y .. y + size.height));
+
+        // If it fits at the top, it ain't getting better.
+        let point = Point::new(x, y);
+        if check_right(rect(point)) {
+            return Some(point);
+        }
+
+        // ------------------------------------------------------------------ //
+        // If it won't fit at the top, search for the left and top-most place.
+        // The best current candidate is `best`.
+
+        let mut best: Option<Point> = None;
+        let mut check = |point: Point| {
+            // Check that we even want that solution before verifying it.
+            if let Some(b) = best {
+                if b.y < point.y {
+                    return;
+                }
+
+                if b.y.approx_eq(&point.y, accuracy) && b.x < point.x {
+                    return;
+                }
+            }
+
+            let rect = rect(point);
+            if check_left(rect) && check_right(rect) && check_top_bot(rect) {
+                best = Some(point);
+            }
+        };
+
+        let mx = TranslateScale::translate(Vec2::new(-size.width, 0.0));
+        let my = TranslateScale::translate(Vec2::new(0.0, -size.height));
+
+        // ------------------------------------------------------------------ //
+        // Try such that curve fits tightly with one of the borders and with a
+        // middle row on the other side.
+
+        let mut check_border_mid = |seg: &Monotone<PathSeg>, x| {
+            match seg.solve_t_for_x(x).as_slice() {
+                [] => {}
+                [t] => check(seg.eval(*t)),
+                _ => panic!("curve is not monotone"),
+            }
+        };
+
+        let left = range.start.max(first.left_max()).max(last.left_max());
+        let right = range.end.min(first.right_min()).max(last.right_min());
+
+        check_border_mid(&first.left, right - size.width);
+        check_border_mid(&(mx * first.right), left);
+
+        // ------------------------------------------------------------------ //
+        // Try such that curves fit tightly with borders.
+
+        let mut check_all = |points: ArrayVec<[Point; 3]>| {
+            for p in points {
+                check(p);
+            }
+        };
+
+        check_all(first.left.intersect(&(mx * first.right), accuracy));
+        check_all(first.left.intersect(&(mx * my * last.right), accuracy));
+        check_all((my * last.left).intersect(&(mx * first.right), accuracy));
+
+        best
     }
 
     /// Returns all slots contained in row `i`.
@@ -271,7 +385,7 @@ fn split_into_rows(
     // Split curves at y values.
     for &seg in monotonics {
         let seg = if seg.start().y > seg.end().y {
-            Monotone(seg.reverse())
+            seg.reverse()
         } else {
             seg
         };
@@ -358,12 +472,12 @@ impl Slot {
     }
 
     /// The horizontal range which surrounds the borders.
-    fn outer(&self) -> Range<f64> {
+    fn outer(&self) -> Range {
         self.left_min() .. self.right_max()
     }
 
     /// The horizontal range which is surrounded by the borders.
-    fn inner(&self) -> Range<f64> {
+    fn inner(&self) -> Range {
         self.left_max() .. self.right_min()
     }
 
@@ -386,16 +500,6 @@ impl Slot {
     fn right_min(&self) -> f64 {
         self.right.start().x.min(self.right.end().x)
     }
-
-    /// Whether the left border is monotonously widening the slot.
-    fn left_widening(&self) -> bool {
-        self.left.start().x >= self.left.end().x
-    }
-
-    /// Whether the right border is monotonously widening the slot.
-    fn right_widening(&self) -> bool {
-        self.right.start().x <= self.right.end().x
-    }
 }
 
 #[cfg(test)]
@@ -407,62 +511,16 @@ mod tests {
         Rect::from_points(point, point + size.to_vec2())
     }
 
-    fn shape(path: &str) -> BezPath {
+    fn svg(path: &str) -> BezPath {
         BezPath::from_svg(path).unwrap()
     }
 
-    fn skewed_vase_shape() -> BezPath {
-        shape("
-            M65 100C23.5 65 59 48 16 20H52.5C90.6055 29.0694 113 66.4999 113
-            100H65Z
-        ")
-    }
-
     fn hat_shape() -> BezPath {
-        shape("M65.5 27.5H21.5L29 64.5L15.5 104.5H98L80 64.5L65.5 27.5Z")
+        svg("M65.5 27.5H21.5L29 64.5L15.5 104.5H98L80 64.5L65.5 27.5Z")
     }
 
-    fn border_group(shape: &BezPath) -> PlacementGroup {
-        let curves: Vec<_> = shape.segments().collect();
-        let left = Monotone(curves[0].reverse());
-        let right = Monotone(curves[2]);
-        PlacementGroup {
-            rows: vec![Row {
-                top: left.start().y,
-                bot: left.end().y,
-                idxs: 0 .. 1,
-            }],
-            slots: vec![Slot { left, right }],
-        }
-    }
-
-    fn hat_group() -> PlacementGroup {
-        let shape = hat_shape();
-        let curves: Vec<_> = shape.segments().collect();
-
-        let left1  = Monotone(curves[1]);
-        let right1 = Monotone(curves[5].reverse());
-        let left2  = Monotone(curves[2]);
-        let right2 = Monotone(curves[4].reverse());
-
-        PlacementGroup {
-            rows: vec![
-                Row {
-                    top: left1.start().y,
-                    bot: left1.end().y,
-                    idxs: 0 .. 1,
-                },
-                Row {
-                    top: left2.start().y,
-                    bot: left2.end().y,
-                    idxs: 1 .. 2,
-                },
-            ],
-            slots: vec![
-                Slot { left: left1, right: right1 },
-                Slot { left: left2, right: right2 },
-            ],
-        }
+    fn skewed_vase_shape() -> BezPath {
+        svg("M65 100C23.5 65 59 48 16 20H52.5C90.6 29.07 113 66.5 113 100H65Z")
     }
 
     #[test]
@@ -475,7 +533,7 @@ mod tests {
 
     #[test]
     fn test_build_banner_group() {
-        let shape = shape("
+        let shape = svg("
             M29.0452 86.5001C27.5159 93.9653 26.1564 102.373 25 111.793L13
             19H106.5L100.5 111.793C99.5083 103.022 97.8405 94.485 95.65
             86.5C81.4874 34.8747 45.4731 6.3054 29.0452 86.5001Z
@@ -487,7 +545,7 @@ mod tests {
 
     #[test]
     fn test_build_strange_tower_group() {
-        let shape = shape("
+        let shape = svg("
             M72 26H28C28 26 36.2035 48.2735 35.5 63C34.7133 79.4679 22 103 22
             103H49.5V63L74.5 81.5V103H104.5C104.5 103 91.2926 90.5292 80.5
             64.5C72 44 72 26 72 26Z
@@ -499,9 +557,8 @@ mod tests {
 
     #[test]
     fn test_place_into_trapez() {
-        let shape = shape("M20 100L40 20H80L100 100H20Z");
-        let group = border_group(&shape);
-
+        let shape = svg("M20 100L40 20H80L100 100H20Z");
+        let group = PlacementGroup::new(&shape, 1e-2);
         assert_approx_eq!(
             group.place(Point::ZERO, Size::new(50.0, 15.0), 1e-2),
             Some(Point::new(35.0, 40.0)),
@@ -511,11 +568,11 @@ mod tests {
 
     #[test]
     fn test_place_into_silo() {
-        let shape = shape("
+        let shape = svg("
             M20 100C20 100 28 32 40 20C52 8.00005 66 8.5 80 20C94 31.5 100 100
             100 100H20Z
         ");
-        let group = border_group(&shape);
+        let group = PlacementGroup::new(&shape, 1e-2);
         assert_approx_eq!(
             group.place(Point::ZERO, Size::new(70.0, 30.0), 1e-2),
             Some(Point::new(25.5, 65.0)),
@@ -525,11 +582,41 @@ mod tests {
 
     #[test]
     fn test_place_into_tailplane() {
-        let shape = shape("M38 100L16 20H52.5L113 100H38Z");
-        let group = border_group(&shape);
+        let shape = svg("M38 100L16 20H52.5L113 100H38Z");
+        let group = PlacementGroup::new(&shape, 1e-2);
         assert_approx_eq!(
             group.place(Point::ZERO, Size::new(40.0, 30.0), 1e-2),
             Some(Point::new(31.0, 45.0)),
+            tolerance = 1.0,
+        );
+    }
+
+    #[test]
+    fn test_place_into_top_of_hat() {
+        let group = PlacementGroup::new(&hat_shape(), 1e-2);
+        assert_approx_eq!(
+            group.place(Point::ZERO, Size::new(35.0, 30.0), 1e-2),
+            Some(Point::new(28.0, 28.0)),
+            tolerance = 1.0,
+        );
+    }
+
+    #[test]
+    fn test_place_into_mid_of_hat() {
+        let group = PlacementGroup::new(&hat_shape(), 1e-2);
+        assert_approx_eq!(
+            group.place(Point::ZERO, Size::new(43.0, 30.0), 1e-2),
+            Some(Point::new(29.0, 44.0)),
+            tolerance = 0.1,
+        );
+    }
+
+    #[test]
+    fn test_place_into_bot_of_hat() {
+        let group = PlacementGroup::new(&hat_shape(), 1e-2);
+        assert_approx_eq!(
+            group.place(Point::ZERO, Size::new(65.0, 12.0), 1e-2),
+            Some(Point::new(23.0, 83.0)),
             tolerance = 1.0,
         );
     }
@@ -546,56 +633,17 @@ mod tests {
     }
 
     #[test]
-    fn test_place_into_weird_placement() {
-        let shape = shape("
+    fn test_place_into_abstract_building() {
+        let shape = svg("
             M65 26L45 26C45 26 52.3727 60.5 25 81.2597C5.38123 96.1388 22 141
             22 141H63V81.2597L100.273 108.89V141H158.5C158.5 141 164.282 85.5
             105 82.5C82.0353 81.3379 65 26 65 26Z
         ");
         let group = PlacementGroup::new(&shape, 1e-2);
-        let pos = group.place(Point::new(0.0, 60.0), Size::new(46.0, 17.0), 1e-2)
-            .unwrap();
-
-        render!(shape);
-        render!(_boxed(pos, Size::new(46.0, 17.0)), color="blue");
-        render!(pos, color="green");
-        // save!("_things/collision/amazed.png");
-        // show!();
-    }
-
-    #[test]
-    fn test_place_into_top_of_hat() {
         assert_approx_eq!(
-            hat_group().place(Point::ZERO, Size::new(35.0, 30.0), 1e-2),
-            Some(Point::new(28.0, 28.0)),
-            tolerance = 1.0,
-        );
-    }
-
-    #[test]
-    fn test_place_into_mid_of_hat() {
-
-
-        render!(hat_shape());
-        let pos= hat_group().place(Point::ZERO, Size::new(43.0, 30.0), 1e-2).unwrap();
-        render!(_boxed(pos, Size::new(43.0, 30.0)), color="blue");
-        render!(pos, color="green");
-        show!();
-
-
-        assert_approx_eq!(
-            hat_group().place(Point::ZERO, Size::new(43.0, 30.0), 1e-2),
-            Some(Point::new(29.0, 44.0)),
-            tolerance = 0.1,
-        );
-    }
-
-    #[test]
-    fn test_place_into_bot_of_hat() {
-        assert_approx_eq!(
-            hat_group().place(Point::ZERO, Size::new(65.0, 12.0), 1e-2),
-            Some(Point::new(23.0, 83.0)),
-            tolerance = 1.0,
+            group.place(Point::new(0.0, 60.0), Size::new(46.0, 17.0), 1e-2),
+            Some(Point::new(17.0, 94.0)),
+            tolerance = 0.5,
         );
     }
 }
