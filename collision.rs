@@ -1,40 +1,42 @@
 //! Collisionless placement of objects.
 
+use arrayvec::ArrayVec;
+use std::cmp::Ordering;
+use std::ops::Range;
 use super::{
-    max, min, value_no_nans, value_approx, ApproxEq, BezPath,
-    PathSeg, ParamCurve, ParamCurveExtrema, ParamCurveSolve, Point, Size,
+    find_intersections, value_no_nans, value_approx, Affine, ApproxEq,
+    BezPath, Monotone, PathSeg, PathSegExt, ParamCurve, ParamCurveExtrema,
+    ParamCurveSolve, Point, Rect, Size,
 };
 
 /// A data structure for fast, collisionless placement of objects into a group
 /// of bezier shapes.
 #[derive(Debug, Clone)]
 pub struct PlacementGroup {
-    /// The rows and their subslice position in `segments`.
-    rows: Vec<PlacementRow>,
-    /// The segment row-by-row.
-    segments: Vec<PlacementSegment>,
+    /// The rows containing subslice range of its slots.
+    rows: Vec<Row>,
+    /// The slots row-by-row.
+    slots: Vec<Slot>,
 }
 
-/// A top- and bot-bounded row of segments.
+/// A top- and bot-bounded row of slots.
 #[derive(Debug, Clone)]
-struct PlacementRow {
+struct Row {
     /// The y-coordinate of the top end of the segment.
     top: f64,
     /// The y-coordinate of the bottom end of the segment.
     bot: f64,
-    /// The start index of the segments making up this row.
-    start: usize,
-    /// The end index of the segments making up this row.
-    end: usize,
+    /// Which slots belong to this row.
+    idxs: Range<usize>,
 }
 
-/// A width-monotonic segment defined by a left and right border.
+/// A slot defined by a left and right border.
 #[derive(Debug, Clone)]
-struct PlacementSegment {
-    /// The left border of the segment.
-    left: PathSeg,
-    /// The right border of the segment.
-    right: PathSeg,
+struct Slot {
+    /// The left border of the slot.
+    left: Monotone<PathSeg>,
+    /// The right border of the slot.
+    right: Monotone<PathSeg>,
 }
 
 impl PlacementGroup {
@@ -44,11 +46,12 @@ impl PlacementGroup {
     /// considered equal or whether a row has to be created between them.
     pub fn new(path: &BezPath, tolerance: f64) -> PlacementGroup {
         let mut rows = vec![];
-        let mut segments = vec![];
+        let mut slots = vec![];
 
-        let (monotonics, splits) = split_monotonics(path, tolerance);
+        // TODO: Multiple paths, inside & outside.
         // TODO: Also split at intersections.
 
+        let (monotonics, splits) = split_monotonics(path, tolerance);
         let border_rows = split_into_rows(&monotonics, &splits, tolerance);
 
         for mut borders in border_rows {
@@ -57,28 +60,31 @@ impl PlacementGroup {
                 &b.start().midpoint(b.end()).x,
             ));
 
+            let start = slots.len();
             let top = borders[0].start().y;
             let bot = borders[0].end().y;
-            let start = segments.len();
 
             for c in borders.chunks_exact(2) {
-                segments.push(PlacementSegment { left: c[0], right: c[1] });
+                slots.push(Slot { left: c[0], right: c[1] });
             }
 
-            let end = segments.len();
-            rows.push(PlacementRow { top, bot, start, end });
+            rows.push(Row {
+                top,
+                bot,
+                idxs: start .. slots.len(),
+            });
         }
 
-        PlacementGroup { rows, segments }
+        PlacementGroup { rows, slots }
     }
 
-    /// Finds the top-and-left-most position in the group to place an object
-    /// with the given `size`.
+    /// Find the top-and-left-most position in the group to place an object with
+    /// the given `size`.
     ///
     /// Specifically, the following guarantees are made:
     /// - When an object with the given `size` is placed such that its top-left
-    ///   corner coincides with the point, it does not collide with any shape
-    ///   in this group.
+    ///   corner coincides with the point, it does not collide with any shape in
+    ///   this group.
     /// - The returned point `p` lies to the right and bottom of `min` (`p.x >=
     ///   min.x` and `p.y >= min.y`).
     /// - There exists no point further to the left or to the top for which the
@@ -87,15 +93,151 @@ impl PlacementGroup {
         &self,
         min: Point,
         size: Size,
-        tolerance: f64,
+        accuracy: f64,
     ) -> Option<Point> {
-        search_place(&self.segments, min, size, tolerance)
+        let s = self.find_first_row(min.y)?;
+
+        // Walk over the top rows where the top edge of the object lies in. The
+        // first candidate row is determined by the min-points `y`-coordinate.
+        for (t, tr) in self.rows.iter().enumerate().skip(s) {
+            let min_top = tr.top.max(min.y);
+            let max_bot = tr.bot;
+            assert!(min_top <= max_bot);
+
+            // Walk over the bottom rows where an object starting in `t` can
+            // end in.
+            for (b, br) in self.rows.iter().enumerate().skip(t) {
+                // Too far to the top - is a middle row.
+                if min_top + size.height > br.bot {
+                    continue;
+                }
+
+                // Too far to the bottom.
+                if max_bot + size.height < br.top {
+                    break;
+                }
+
+                let mut best: Option<Point> = None;
+
+                // Walk through the horizontal ranges where an object that
+                // starts in `t` and ends in `b` can be placed (these depend
+                // also on the rows in between `t` and `b`).
+                for (r, f, l) in self.ranges(t, b) {
+                    // Try to place the object in the range `r`, starting in `f`
+                    // and ending in `l`.
+                    let point = self.try_place_into(r, f, l, size, accuracy);
+
+                    if let Some(p) = point {
+                        if best.map(|b| p.y < b.y).unwrap_or(true) {
+                            best = point;
+                        }
+                    }
+                }
+
+                if best.is_some() {
+                    return best;
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Find the first row which contains the `y` coordinate or is below it.
+    fn find_first_row(&self, y: f64) -> Option<usize> {
+        match self.rows.binary_search_by(|row| {
+            if row.top > y {
+                Ordering::Greater
+            } else if row.bot <= y {
+                Ordering::Less
+            } else {
+                Ordering::Equal
+            }
+        }) {
+            Ok(i) => Some(i),
+            Err(i) if i < self.rows.len() => Some(i),
+            _ => None,
+        }
+    }
+
+    /// Returns all ranges and corresponding top & bottom slots where objects
+    /// can be placed with their top edge in `t` and their bottom edge in `b`.
+    fn ranges(
+        &self,
+        t: usize,
+        b: usize,
+    ) -> impl Iterator<Item=(Range<f64>, &Slot, &Slot)> {
+        assert!(t <= b);
+
+        let mut ts = self.slots(t);
+        let mut bs = self.slots(b);
+        let mut ms: Vec<_> = (t + 1 .. b)
+            .map(|m| self.slots(m))
+            .collect();
+
+        // Compute the subranges where there is a slot for all rows - which is
+        // basically the intersection between the row's slots.
+        let mut done = false;
+        std::iter::from_fn(move || {
+            while !done {
+                let mut start = f64::NEG_INFINITY;
+                let mut end = f64::INFINITY;
+                let mut min = None;
+
+                let mut check = |r: Range<f64>, v| {
+                    start = start.max(r.start);
+                    if r.end < end {
+                        min = Some(v);
+                        end = r.end;
+                    }
+                };
+
+                let (f, l) = (&ts[0], &bs[0]);
+                check(f.outer(), &mut ts);
+                check(l.outer(), &mut bs);
+
+                for m in &mut ms {
+                    check(m[0].inner(), m);
+                }
+
+                let min = min.unwrap();
+                *min = &min[1..];
+                done = min.is_empty();
+
+                if start < end {
+                    return Some((start .. end, f, l));
+                }
+            }
+
+            None
+        })
+    }
+
+    /// Try to place the object into the given range, starting in slot `f` and
+    /// ending in slot `l`.
+    fn try_place_into(
+        &self,
+        range: Range<f64>,
+        first: &Slot,
+        last: &Slot,
+        size: Size,
+        accuracy: f64,
+    ) -> Option<Point> {
+        todo!("try_place_into")
+    }
+
+    /// Returns all slots contained in row `i`.
+    fn slots(&self, i: usize) -> &[Slot] {
+        &self.slots[self.rows[i].idxs.clone()]
     }
 }
 
 /// Split the path into monotonic subsegments and return them and alongside all
 /// y-coordinates at which subsegments start and end.
-fn split_monotonics(path: &BezPath, tolerance: f64) -> (Vec<PathSeg>, Vec<f64>) {
+fn split_monotonics(
+    path: &BezPath,
+    tolerance: f64,
+) -> (Vec<Monotone<PathSeg>>, Vec<f64>) {
     let mut monotonics = vec![];
     let mut splits = vec![];
 
@@ -103,15 +245,10 @@ fn split_monotonics(path: &BezPath, tolerance: f64) -> (Vec<PathSeg>, Vec<f64>) 
     for seg in path.segments() {
         splits.push(seg.start().y);
 
-        let mut t_start = 0.0;
-        for t in seg.extrema() {
-            monotonics.push(seg.subsegment(t_start .. t));
-            splits.push(seg.eval(t).y);
-            t_start = t;
+        for r in seg.extrema_ranges() {
+            splits.push(seg.eval(r.end).y);
+            monotonics.push(Monotone(seg.subsegment(r)));
         }
-
-        monotonics.push(seg.subsegment(t_start .. 1.0));
-        splits.push(seg.end().y);
     }
 
     // Make the splits `y`-unique.
@@ -124,16 +261,21 @@ fn split_monotonics(path: &BezPath, tolerance: f64) -> (Vec<PathSeg>, Vec<f64>) 
 /// Split monotonics segments into rows of subsegments such that no segment
 /// crosses a vertical split.
 fn split_into_rows(
-    monotonics: &[PathSeg],
+    monotonics: &[Monotone<PathSeg>],
     splits: &[f64],
     tolerance: f64,
-) -> Vec<Vec<PathSeg>> {
+) -> Vec<Vec<Monotone<PathSeg>>> {
     let len = splits.len();
     let mut rows = vec![vec![]; if len > 0 { len - 1 } else { 0 }];
 
     // Split curves at y values.
     for &seg in monotonics {
-        let seg = if seg.start().y < seg.end().y { seg } else { seg.reverse() };
+        let seg = if seg.start().y > seg.end().y {
+            Monotone(seg.reverse())
+        } else {
+            seg
+        };
+
         let top = seg.start().y;
         let bot = seg.end().y;
 
@@ -178,204 +320,79 @@ fn split_into_rows(
     rows
 }
 
-/// Search for the top-most position in the first possible segment.
-fn search_place(
-    segments: &[PlacementSegment],
-    _min: Point,
-    size: Size,
-    tolerance: f64,
-) -> Option<Point> {
-    for (f, first) in segments.iter().enumerate() {
-        let mut top = first.top();
-        let first_max_bot = first.bot();
-
-        for (l, last) in segments.iter().enumerate().skip(f) {
-            // The real top and bottom ends of the search interval for the
-            // object's origin point are inset by the height and depth of
-            // the object - lower or higher would make the object stick out.
-            let last_max_bot = last.bot() - size.height;
-            let bot = min(first_max_bot, last_max_bot);
-
-            // If the object is higher than the available space, it cannot
-            // fit.
-            if top > bot {
-                println!("info: skipping last segment");
-                continue;
-            }
-
-            let segments = &segments[f ..= l];
-            let found = search_bisect(size, top, bot, segments, tolerance);
-            if found.is_some() {
-                return found;
-            }
-
-            // If the first segment is exhausted, we can leave the inner
-            // loop.
-            if last_max_bot > first_max_bot {
-                println!("info: leaving first segment");
-                break;
-            }
-
-            top = bot;
-        }
-    }
-
-    None
-}
-
-/// Search for a vertical position to place an object with the given `size` at
-/// positions between `top` and `bot`.
-///
-/// At least one segment must be given.
-///
-/// The top end of the object must fall into the first segment and the bot end
-/// into the last segment for all values between `top` and `bot`. As a
-/// consequence, all inner segments are always completely filled by the object,
-/// vertically.
-fn search_bisect(
-    size: Size,
-    mut top: f64,
-    mut bot: f64,
-    segments: &[PlacementSegment],
-    tolerance: f64,
-) -> Option<Point> {
-    const MAX_ITERS: usize = 20;
-
-    let len   = segments.len();
-    let first = &segments[0];
-    let mid   = &segments[1 .. (len - 1).max(1)];
-    let last  = &segments[len - 1];
-
-    assert!(bot <= first.bot(), "does not start in first segment");
-    assert!(top + size.height >= last.top(), "does not end in last segment");
-
-    // The offset from the origin point to the corner (top or bottom) at which
-    // the curve is tighter. The bool `widening` should be true when the curve
-    // is widening the segment from with growing y-value.
-    let tightest_offset = |widening: bool| -> f64 {
-        if widening { 0.0 } else { size.height }
-    };
-
-    let left_first_offset  = tightest_offset(first.left_widening());
-    let left_last_offset   = tightest_offset(last.left_widening());
-    let right_first_offset = tightest_offset(first.right_widening());
-    let right_last_offset  = tightest_offset(last.right_widening());
-
-    let left_mid_x = mid
-        .iter()
-        .map(|seg| max(seg.left.start().x, seg.left.end().x))
-        .max_by(value_no_nans)
-        .unwrap_or(f64::NEG_INFINITY);
-
-    let right_mid_x = mid
-        .iter()
-        .map(|seg| min(seg.right.start().x, seg.right.end().x))
-        .min_by(value_no_nans)
-        .unwrap_or(f64::INFINITY);
-
-    // Left x, right x and width if the object's origin is placed at `y`.
-    let lrxw_at_y = |y: f64| {
-        // TODO: Don't compute twice if first == last.
-        let left_first_x = find_one_x(first.left, y + left_first_offset);
-        let left_last_x  = find_one_x(last.left,  y + left_last_offset);
-        let left_x = left_first_x.max(left_mid_x).max(left_last_x);
-
-        let right_first_x = find_one_x(first.right, y + right_first_offset);
-        let right_last_x  = find_one_x(last.right,  y + right_last_offset);
-        let right_x = right_first_x.min(right_mid_x).min(right_last_x);
-
-        let width = right_x - left_x;
-        (left_x, right_x, width)
-    };
-
-    let (top_left_x, _, mut top_width) = lrxw_at_y(top);
-
-    // If it already fits at the top, we're good.
-    if size.width <= top_width {
-        println!("info: fits at the top");
-        return Some(Point::new(top_left_x, top));
-    }
-
-    let (_,          _, mut bot_width) = lrxw_at_y(bot);
-
-    // If it does not fit at the top and also not at the bottom, it won't
-    // fit at all, since the width function is monotonous.
-    if size.width > bot_width {
-        println!("info: object is too wide");
-        return None;
-    }
-
-    let mut iter = 1;
-    loop {
-        // Determine the next `y` value by linear interpolation between the
-        // min and max bounds.
-        let ratio = (size.width - top_width) / (bot_width - top_width);
-        let y = top + ratio * (bot - top);
-        let (left_x, _, width) = lrxw_at_y(y);
-
-        // Check whether we converged to a good spot.
-        if width.approx_eq(&size.width, tolerance) {
-            println!("info: converged in {}. iteration", iter);
-            return Some(Point::new(left_x, y));
-        }
-
-        // Adjust the bounds by replacing the bad bound with the better
-        // estimate.
-        if size.width < width {
-            bot = y;
-            bot_width = width;
-        } else {
-            top = y;
-            top_width = width;
-        }
-
-        if iter > MAX_ITERS {
-            println!("warning: bisection search did not converge");
-            return None;
-        }
-
-        iter += 1;
-    }
-}
-
-/// Tries to to find an `x` position at which the given `curve` has the given
-/// `y` value. The `y` value is clamped into the valid y-range for the curve.
+/// Tries to to find an `x` position at which the curve has the given `y` value.
+/// The `y` value is clamped into the valid y-range for the curve.
 ///
 /// The curve must be monotonic and the min-max rectangle defined by start and
 /// end point must be a bounding box for the curve.
-fn find_one_x(seg: PathSeg, y: f64) -> f64 {
-    const EPS: f64 = 1e-4;
+fn solve_one_x<C>(seg: &Monotone<C>, y: f64, accuracy: f64) -> f64
+where
+    C: ParamCurveSolve
+{
+    let start = seg.start();
+    if y < start.y + accuracy {
+        return start.x;
+    }
 
-    if y < seg.start().y + EPS {
-        return seg.start().x;
-    } else if y > seg.end().y - EPS {
-        return seg.end().x;
+    let end = seg.end();
+    if y > end.y - accuracy {
+        return end.x;
     }
 
     match seg.solve_x_for_y(y).as_slice() {
-        &[] => panic!("there should be at least one root"),
-        &[x] => x,
-        xs => panic!("curve is not monotone and has multiple roots: {:?}", xs),
+        [x] => *x,
+        [] => panic!("there should be at least one root"),
+        _ => panic!("curve is not monotone"),
     }
 }
 
-impl PlacementSegment {
-    /// The top end of this segment.
+impl Slot {
+    /// The slot's top end.
     fn top(&self) -> f64 {
         self.left.start().y
     }
 
-    /// The bottom end of this segment.
+    /// The slot's bottom end.
     fn bot(&self) -> f64 {
         self.left.end().y
     }
 
-    /// Whether the left border is monotonously widening the segment.
+    /// The horizontal range which surrounds the borders.
+    fn outer(&self) -> Range<f64> {
+        self.left_min() .. self.right_max()
+    }
+
+    /// The horizontal range which is surrounded by the borders.
+    fn inner(&self) -> Range<f64> {
+        self.left_max() .. self.right_min()
+    }
+
+    /// The maximum x value of the left border.
+    fn left_max(&self) -> f64 {
+        self.left.start().x.max(self.left.end().x)
+    }
+
+    /// The minimum x value of the left border.
+    fn left_min(&self) -> f64 {
+        self.left.start().x.min(self.left.end().x)
+    }
+
+    /// The maximum x value of the right border.
+    fn right_max(&self) -> f64 {
+        self.right.start().x.max(self.right.end().x)
+    }
+
+    /// The minimum x value of the right border.
+    fn right_min(&self) -> f64 {
+        self.right.start().x.min(self.right.end().x)
+    }
+
+    /// Whether the left border is monotonously widening the slot.
     fn left_widening(&self) -> bool {
         self.left.start().x >= self.left.end().x
     }
 
-    /// Whether the right border is monotonously widening the segment.
+    /// Whether the right border is monotonously widening the slot.
     fn right_widening(&self) -> bool {
         self.right.start().x <= self.right.end().x
     }
@@ -407,16 +424,15 @@ mod tests {
 
     fn border_group(shape: &BezPath) -> PlacementGroup {
         let curves: Vec<_> = shape.segments().collect();
-        let left = curves[0].reverse();
-        let right = curves[2];
+        let left = Monotone(curves[0].reverse());
+        let right = Monotone(curves[2]);
         PlacementGroup {
-            rows: vec![PlacementRow {
+            rows: vec![Row {
                 top: left.start().y,
                 bot: left.end().y,
-                start: 0,
-                end: 1,
+                idxs: 0 .. 1,
             }],
-            segments: vec![PlacementSegment { left, right }],
+            slots: vec![Slot { left, right }],
         }
     }
 
@@ -424,29 +440,27 @@ mod tests {
         let shape = hat_shape();
         let curves: Vec<_> = shape.segments().collect();
 
-        let left1  = curves[1];
-        let right1 = curves[5].reverse();
-        let left2  = curves[2];
-        let right2 = curves[4].reverse();
+        let left1  = Monotone(curves[1]);
+        let right1 = Monotone(curves[5].reverse());
+        let left2  = Monotone(curves[2]);
+        let right2 = Monotone(curves[4].reverse());
 
         PlacementGroup {
             rows: vec![
-                PlacementRow {
+                Row {
                     top: left1.start().y,
                     bot: left1.end().y,
-                    start: 0,
-                    end: 1,
+                    idxs: 0 .. 1,
                 },
-                PlacementRow {
+                Row {
                     top: left2.start().y,
                     bot: left2.end().y,
-                    start: 1,
-                    end: 2,
+                    idxs: 1 .. 2,
                 },
             ],
-            segments: vec![
-                PlacementSegment { left: left1, right: right1 },
-                PlacementSegment { left: left2, right: right2 },
+            slots: vec![
+                Slot { left: left1, right: right1 },
+                Slot { left: left2, right: right2 },
             ],
         }
     }
@@ -456,7 +470,7 @@ mod tests {
         let shape = skewed_vase_shape();
         let group = PlacementGroup::new(&shape, 1e-2);
         assert_eq!(group.rows.len(), 1);
-        assert_eq!(group.segments.len(), 1);
+        assert_eq!(group.slots.len(), 1);
     }
 
     #[test]
@@ -468,7 +482,7 @@ mod tests {
         ");
         let group = PlacementGroup::new(&shape, 1e-2);
         assert_eq!(group.rows.len(), 3);
-        assert_eq!(group.segments.len(), 5);
+        assert_eq!(group.slots.len(), 5);
     }
 
     #[test]
@@ -480,16 +494,18 @@ mod tests {
         ");
         let group = PlacementGroup::new(&shape, 1e-2);
         assert_eq!(group.rows.len(), 5);
-        assert_eq!(group.segments.len(), 8);
+        assert_eq!(group.slots.len(), 8);
     }
 
     #[test]
     fn test_place_into_trapez() {
         let shape = shape("M20 100L40 20H80L100 100H20Z");
         let group = border_group(&shape);
+
         assert_approx_eq!(
             group.place(Point::ZERO, Size::new(50.0, 15.0), 1e-2),
             Some(Point::new(35.0, 40.0)),
+            tolerance = 1e-2,
         );
     }
 
@@ -519,6 +535,35 @@ mod tests {
     }
 
     #[test]
+    fn test_place_into_skewed_vase() {
+        let shape = skewed_vase_shape();
+        let group = PlacementGroup::new(&shape, 1e-2);
+        assert_approx_eq!(
+            group.place(Point::ZERO, Size::new(50.0, 17.0), 1e-2),
+            Some(Point::new(41.5, 44.0)),
+            tolerance = 0.25,
+        );
+    }
+
+    #[test]
+    fn test_place_into_weird_placement() {
+        let shape = shape("
+            M65 26L45 26C45 26 52.3727 60.5 25 81.2597C5.38123 96.1388 22 141
+            22 141H63V81.2597L100.273 108.89V141H158.5C158.5 141 164.282 85.5
+            105 82.5C82.0353 81.3379 65 26 65 26Z
+        ");
+        let group = PlacementGroup::new(&shape, 1e-2);
+        let pos = group.place(Point::new(0.0, 60.0), Size::new(46.0, 17.0), 1e-2)
+            .unwrap();
+
+        render!(shape);
+        render!(_boxed(pos, Size::new(46.0, 17.0)), color="blue");
+        render!(pos, color="green");
+        // save!("_things/collision/amazed.png");
+        // show!();
+    }
+
+    #[test]
     fn test_place_into_top_of_hat() {
         assert_approx_eq!(
             hat_group().place(Point::ZERO, Size::new(35.0, 30.0), 1e-2),
@@ -529,6 +574,15 @@ mod tests {
 
     #[test]
     fn test_place_into_mid_of_hat() {
+
+
+        render!(hat_shape());
+        let pos= hat_group().place(Point::ZERO, Size::new(43.0, 30.0), 1e-2).unwrap();
+        render!(_boxed(pos, Size::new(43.0, 30.0)), color="blue");
+        render!(pos, color="green");
+        show!();
+
+
         assert_approx_eq!(
             hat_group().place(Point::ZERO, Size::new(43.0, 30.0), 1e-2),
             Some(Point::new(29.0, 44.0)),
