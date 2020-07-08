@@ -12,29 +12,29 @@ use super::{
 /// of bezier shapes.
 #[derive(Debug, Clone)]
 pub struct PlacementGroup {
-    /// The rows containing subslice range of its slots.
+    /// The rows containing subslice range of its regions.
     rows: Vec<Row>,
-    /// The slots row-by-row.
-    slots: Vec<Slot>,
+    /// The regions row-by-row.
+    regions: Vec<Region>,
 }
 
-/// A top- and bot-bounded row of slots.
+/// A top- and bot-bounded row of regions.
 #[derive(Debug, Clone)]
 struct Row {
     /// The y-coordinate of the top end of the segment.
     top: f64,
     /// The y-coordinate of the bottom end of the segment.
     bot: f64,
-    /// Which slots belong to this row.
+    /// Which regions belong to this row.
     idxs: std::ops::Range<usize>,
 }
 
-/// A slot defined by a left and right border.
+/// A region defined by a left and right border.
 #[derive(Debug, Clone)]
-struct Slot {
-    /// The left border of the slot.
+struct Region {
+    /// The left border of the region.
     left: Monotone<PathSeg>,
-    /// The right border of the slot.
+    /// The right border of the region.
     right: Monotone<PathSeg>,
 }
 
@@ -45,7 +45,7 @@ impl PlacementGroup {
     /// considered equal or whether a row has to be created between them.
     pub fn new(path: &BezPath, tolerance: f64) -> PlacementGroup {
         let mut rows = vec![];
-        let mut slots = vec![];
+        let mut regions = vec![];
 
         // TODO: Multiple paths, inside & outside.
         // TODO: Also split at intersections.
@@ -59,22 +59,22 @@ impl PlacementGroup {
                 &b.start().midpoint(b.end()).x,
             ));
 
-            let start = slots.len();
+            let start = regions.len();
             let top = borders[0].start().y;
             let bot = borders[0].end().y;
 
             for c in borders.chunks_exact(2) {
-                slots.push(Slot { left: c[0], right: c[1] });
+                regions.push(Region { left: c[0], right: c[1] });
             }
 
             rows.push(Row {
                 top,
                 bot,
-                idxs: start .. slots.len(),
+                idxs: start .. regions.len(),
             });
         }
 
-        PlacementGroup { rows, slots }
+        PlacementGroup { rows, regions }
     }
 
     /// Find the top-and-left-most position in the group to place an object with
@@ -159,24 +159,22 @@ impl PlacementGroup {
         }
     }
 
-    /// Returns all ranges and corresponding top & bottom slots where objects
+    /// Returns all ranges and corresponding top & bottom regions where objects
     /// can be placed with their top edge in `t` and their bottom edge in `b`.
     fn ranges(
         &self,
         t: usize,
         b: usize,
         min_x: f64,
-    ) -> impl Iterator<Item=(Range, &Slot, &Slot)> {
+    ) -> impl Iterator<Item=(Range, &Region, &Region)> {
         assert!(t <= b);
 
-        let mut ts = self.slots(t);
-        let mut bs = self.slots(b);
-        let mut ms: Vec<_> = (t + 1 .. b)
-            .map(|m| self.slots(m))
-            .collect();
+        let mut tr = self.regions(t);
+        let mut br = self.regions(b);
+        let mut mr: Vec<_> = (t + 1 .. b).map(|m| self.regions(m)).collect();
 
-        // Compute the subranges where there is a slot for all rows - which is
-        // basically the intersection between the row's slots.
+        // Compute the subranges where there is a region for all rows - which is
+        // basically the intersection between the row's regions.
         let mut done = false;
         std::iter::from_fn(move || {
             while !done {
@@ -192,11 +190,11 @@ impl PlacementGroup {
                     }
                 };
 
-                let (f, l) = (&ts[0], &bs[0]);
-                check(f.outer(), &mut ts);
-                check(l.outer(), &mut bs);
+                let (f, l) = (&tr[0], &br[0]);
+                check(f.outer(), &mut tr);
+                check(l.outer(), &mut br);
 
-                for m in &mut ms {
+                for m in &mut mr {
                     check(m[0].inner(), m);
                 }
 
@@ -213,13 +211,13 @@ impl PlacementGroup {
         })
     }
 
-    /// Try to place the object into the given range, starting in slot `f` and
-    /// ending in slot `l`.
+    /// Try to place the object into the given range, starting in region `f` and
+    /// ending in region `l`.
     fn try_place_into(
         &self,
         range: Range,
-        first: &Slot,
-        last: &Slot,
+        first: &Region,
+        last: &Region,
         min_y: f64,
         size: Size,
         accuracy: f64,
@@ -341,9 +339,9 @@ impl PlacementGroup {
         best
     }
 
-    /// Returns all slots contained in row `i`.
-    fn slots(&self, i: usize) -> &[Slot] {
-        &self.slots[self.rows[i].idxs.clone()]
+    /// Returns all regions contained in row `i`.
+    fn regions(&self, i: usize) -> &[Region] {
+        &self.regions[self.rows[i].idxs.clone()]
     }
 }
 
@@ -461,13 +459,13 @@ where
     }
 }
 
-impl Slot {
-    /// The slot's top end.
+impl Region {
+    /// The region's top end.
     fn top(&self) -> f64 {
         self.left.start().y
     }
 
-    /// The slot's bottom end.
+    /// The region's bottom end.
     fn bot(&self) -> f64 {
         self.left.end().y
     }
@@ -537,7 +535,7 @@ mod tests {
         let shape = skewed_vase();
         let group = PlacementGroup::new(&shape, 1e-2);
         assert_eq!(group.rows.len(), 1);
-        assert_eq!(group.slots.len(), 1);
+        assert_eq!(group.regions.len(), 1);
     }
 
     #[test]
@@ -549,7 +547,7 @@ mod tests {
         ");
         let group = PlacementGroup::new(&shape, 1e-2);
         assert_eq!(group.rows.len(), 3);
-        assert_eq!(group.slots.len(), 5);
+        assert_eq!(group.regions.len(), 5);
     }
 
     #[test]
@@ -561,7 +559,7 @@ mod tests {
         ");
         let group = PlacementGroup::new(&shape, 1e-2);
         assert_eq!(group.rows.len(), 5);
-        assert_eq!(group.slots.len(), 8);
+        assert_eq!(group.regions.len(), 8);
     }
 
     #[test]
