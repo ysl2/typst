@@ -516,17 +516,25 @@ mod tests {
         BezPath::from_svg(path).unwrap()
     }
 
-    fn hat_shape() -> BezPath {
+    fn hat() -> BezPath {
         svg("M65.5 27.5H21.5L29 64.5L15.5 104.5H98L80 64.5L65.5 27.5Z")
     }
 
-    fn skewed_vase_shape() -> BezPath {
+    fn skewed_vase() -> BezPath {
         svg("M65 100C23.5 65 59 48 16 20H52.5C90.6 29.07 113 66.5 113 100H65Z")
+    }
+
+    fn weird_high_heel() -> BezPath {
+        svg("
+            M65 26L45 26C45 26 52.3727 60.5 25 81.2597C5.38123 96.1388 22 141
+            22 141H63V81.2597L100.273 108.89V141H158.5C158.5 141 164.282 85.5
+            105 82.5C82.0353 81.3379 65 26 65 26Z
+        ")
     }
 
     #[test]
     fn test_build_skewed_vase_group() {
-        let shape = skewed_vase_shape();
+        let shape = skewed_vase();
         let group = PlacementGroup::new(&shape, 1e-2);
         assert_eq!(group.rows.len(), 1);
         assert_eq!(group.slots.len(), 1);
@@ -616,7 +624,7 @@ mod tests {
 
     #[test]
     fn test_place_into_top_of_hat() {
-        let group = PlacementGroup::new(&hat_shape(), 1e-2);
+        let group = PlacementGroup::new(&hat(), 1e-2);
         assert_approx_eq!(
             group.place(Point::ZERO, Size::new(35.0, 30.0), 1e-2),
             Some(Point::new(28.0, 28.0)),
@@ -626,7 +634,7 @@ mod tests {
 
     #[test]
     fn test_place_into_mid_of_hat() {
-        let group = PlacementGroup::new(&hat_shape(), 1e-2);
+        let group = PlacementGroup::new(&hat(), 1e-2);
         assert_approx_eq!(
             group.place(Point::ZERO, Size::new(43.0, 30.0), 1e-2),
             Some(Point::new(29.0, 44.0)),
@@ -636,7 +644,7 @@ mod tests {
 
     #[test]
     fn test_place_into_bot_of_hat() {
-        let group = PlacementGroup::new(&hat_shape(), 1e-2);
+        let group = PlacementGroup::new(&hat(), 1e-2);
         assert_approx_eq!(
             group.place(Point::ZERO, Size::new(65.0, 12.0), 1e-2),
             Some(Point::new(23.0, 83.0)),
@@ -646,8 +654,7 @@ mod tests {
 
     #[test]
     fn test_place_into_skewed_vase() {
-        let shape = skewed_vase_shape();
-        let group = PlacementGroup::new(&shape, 1e-2);
+        let group = PlacementGroup::new(&skewed_vase(), 1e-2);
         assert_approx_eq!(
             group.place(Point::ZERO, Size::new(50.0, 17.0), 1e-2),
             Some(Point::new(41.5, 44.0)),
@@ -656,17 +663,32 @@ mod tests {
     }
 
     #[test]
-    fn test_place_into_abstract_building() {
-        let shape = svg("
-            M65 26L45 26C45 26 52.3727 60.5 25 81.2597C5.38123 96.1388 22 141
-            22 141H63V81.2597L100.273 108.89V141H158.5C158.5 141 164.282 85.5
-            105 82.5C82.0353 81.3379 65 26 65 26Z
-        ");
-        let group = PlacementGroup::new(&shape, 1e-2);
+    fn test_place_into_top_of_weird_high_heel() {
+        let group = PlacementGroup::new(&weird_high_heel(), 1e-2);
+        assert_approx_eq!(
+            group.place(Point::ZERO, Size::new(32.0, 12.0), 1e-2),
+            Some(Point::new(44.0, 52.0)),
+            tolerance = 1.0,
+        );
+    }
+
+    #[test]
+    fn test_place_into_left_of_weird_high_heel() {
+        let group = PlacementGroup::new(&weird_high_heel(), 1e-2);
         assert_approx_eq!(
             group.place(Point::new(0.0, 60.0), Size::new(46.0, 17.0), 1e-2),
             Some(Point::new(17.0, 94.0)),
             tolerance = 0.5,
+        );
+    }
+
+    #[test]
+    fn test_place_into_right_of_weird_high_heel() {
+        let group = PlacementGroup::new(&weird_high_heel(), 1e-2);
+        assert_approx_eq!(
+            group.place(Point::ZERO, Size::new(50.0, 17.0), 1e-2),
+            Some(Point::new(100.0, 106.0)),
+            tolerance = 1.0,
         );
     }
 }
