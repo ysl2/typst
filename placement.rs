@@ -96,23 +96,24 @@ impl PlacementGroup {
     ) -> Option<Point> {
         let s = self.find_first_row(min.y)?;
 
-        // Walk over the top rows where the top edge of the object lies in. The
-        // first candidate row is determined by the min-points `y`-coordinate.
-        for (t, tr) in self.rows.iter().enumerate().skip(s) {
-            let min_top = tr.top.max(min.y);
-            let max_bot = tr.bot;
+        // Walk over the rows where the top edge of the object can fall into.
+        // The first candidate row is determined by the min-point's
+        // `y`-coordinate.
+        for (i, top_row) in self.rows.iter().enumerate().skip(s) {
+            let min_top = top_row.top.max(min.y);
+            let max_bot = top_row.bot;
             assert!(min_top <= max_bot);
 
-            // Walk over the bottom rows where an object starting in `t` can
-            // end in.
-            for (b, br) in self.rows.iter().enumerate().skip(t) {
+            // Walk over the bottom rows where an object starting in `top_row`
+            // can end in.
+            for (j, bot_row) in self.rows.iter().enumerate().skip(i) {
                 // Too far to the top - is a middle row.
-                if min_top + size.height > br.bot {
+                if min_top + size.height > bot_row.bot {
                     continue;
                 }
 
-                // Too far to the bottom.
-                if max_bot + size.height < br.top {
+                // Too far to the bottom - cannot end here.
+                if max_bot + size.height < bot_row.top {
                     break;
                 }
 
@@ -121,10 +122,15 @@ impl PlacementGroup {
                 // Walk through the horizontal ranges where an object that
                 // starts in `t` and ends in `b` can be placed (these depend
                 // also on the rows in between `t` and `b`).
-                for (r, f, l) in self.ranges(t, b, min.x) {
-                    // Try to place the object in the range `r`, starting in `f`
-                    // and ending in `l`.
-                    let point = self.try_place_into(r, f, l, min.y, size, accuracy);
+                for (range, top_region, bot_region) in self.ranges(i, j, min.x) {
+                    let point = self.try_place_into(
+                        range,
+                        min.y,
+                        size,
+                        top_region,
+                        bot_region,
+                        accuracy
+                    );
 
                     if let Some(p) = point {
                         if best.map(|b| p.y < b.y).unwrap_or(true) {
@@ -159,75 +165,72 @@ impl PlacementGroup {
         }
     }
 
-    /// Returns all ranges and corresponding top & bottom regions where objects
-    /// can be placed with their top edge in `t` and their bottom edge in `b`.
+    /// Returns all ranges and the top & bottom region they fall into,
+    /// respectively, for top row `i` and bottom row `j`.
     fn ranges(
         &self,
-        t: usize,
-        b: usize,
+        i: usize,
+        j: usize,
         min_x: f64,
     ) -> impl Iterator<Item=(Range, &Region, &Region)> {
-        assert!(t <= b);
+        assert!(i <= j);
 
-        let mut tr = self.regions(t);
-        let mut br = self.regions(b);
-        let mut mr: Vec<_> = (t + 1 .. b).map(|m| self.regions(m)).collect();
+        let mut done = false;
+        let mut top_regions = self.regions(i);
+        let mut bot_regions = self.regions(j);
+        let mut mid_regions: Vec<_> = (i + 1 .. j)
+            .map(|m| self.regions(m))
+            .collect();
 
         // Compute the subranges where there is a region for all rows - which is
         // basically the intersection between the row's regions.
-        let mut done = false;
-        std::iter::from_fn(move || {
-            while !done {
-                let mut start = min_x;
-                let mut end = f64::INFINITY;
-                let mut min = None;
-
-                let mut check = |r: Range, v| {
-                    start = start.max(r.start);
-                    if r.end < end {
-                        min = Some(v);
-                        end = r.end;
-                    }
-                };
-
-                let (f, l) = (&tr[0], &br[0]);
-                check(f.outer(), &mut tr);
-                check(l.outer(), &mut br);
-
-                for m in &mut mr {
-                    check(m[0].inner(), m);
-                }
-
-                let min = min.unwrap();
-                *min = &min[1..];
-                done = min.is_empty();
-
-                if start < end {
-                    return Some((start .. end, f, l));
-                }
+        std::iter::from_fn(move || loop {
+            if done {
+                return None;
             }
 
-            None
+            let (t, b) = (&top_regions[0], &bot_regions[0]);
+            let (to, bo) = (t.outer(), b.outer());
+
+            let mut start = min_x.max(to.start).max(bo.start);
+            let mut end = to.end.min(bo.end);
+            let mut min = if to.end < bo.end {
+                &mut top_regions
+            } else {
+                &mut bot_regions
+            };
+
+            for m in &mut mid_regions {
+                let range = m[0].inner();
+                min = if range.end < end { m } else { min };
+                start = start.max(range.start);
+                end = end.min(range.end);
+            }
+
+            *min = &min[1..];
+            done = min.is_empty();
+
+            if start < end {
+                return Some((start .. end, t, b));
+            }
         })
     }
 
-    /// Try to place the object into the given range, starting in region `f` and
-    /// ending in region `l`.
+    /// Try to place the object into the given range, starting in region `top_region`
+    /// and ending in region `bot_region`.
     fn try_place_into(
         &self,
         range: Range,
-        first: &Region,
-        last: &Region,
         min_y: f64,
         size: Size,
+        top_region: &Region,
+        bot_region: &Region,
         accuracy: f64,
     ) -> Option<Point> {
         // The object cannot fit if the range is not wide enough.
         if range.end - range.start + accuracy < size.width {
             return None;
         }
-
-        let top = first.top().max(min_y);
 
         // The rectangle occupied by the object when placed at `p`.
         let rect = |p| {
@@ -248,21 +251,22 @@ impl PlacementGroup {
         // Check that the rectangle does not collide with the left borders.
         let check_left = |rect: Rect| {
             rect.x0 > range.start
-            && rect.x0 > solve_max_x(&first.left, rect.y0 .. rect.y1)
-            && rect.x0 > solve_max_x(&last.left, rect.y0 .. rect.y1)
+            && rect.x0 > solve_max_x(&top_region.left, rect.y0 .. rect.y1)
+            && rect.x0 > solve_max_x(&bot_region.left, rect.y0 .. rect.y1)
         };
 
         // Check that the rectangle does not collide with the right borders.
         let check_right = |rect: Rect| {
             rect.x1 < range.end
-            && rect.x1 < solve_min_x(&first.right, rect.y0 .. rect.y1)
-            && rect.x1 < solve_min_x(&last.right, rect.y0 .. rect.y1)
+            && rect.x1 < solve_min_x(&top_region.right, rect.y0 .. rect.y1)
+            && rect.x1 < solve_min_x(&bot_region.right, rect.y0 .. rect.y1)
         };
 
         // Check that the rectangle does not collide with the top & bottom end
         // of the row.
+        let min_top = top_region.top().max(min_y);
         let check_top_bot = |rect: Rect| {
-            top < rect.y0 + accuracy && last.bot() > rect.y1 - accuracy
+            min_top < rect.y0 + accuracy && bot_region.bot() > rect.y1 - accuracy
         };
 
         // ------------------------------------------------------------------ //
@@ -270,11 +274,11 @@ impl PlacementGroup {
 
         // Find out the x-position for placing at the top border.
         let x = range.start
-            .max(solve_max_x(&first.left, top .. top + size.height))
-            .max(solve_max_x(&last.left, top .. top + size.height));
+            .max(solve_max_x(&top_region.left, min_top .. min_top + size.height))
+            .max(solve_max_x(&bot_region.left, min_top .. min_top + size.height));
 
         // If it fits at the top, it ain't getting better.
-        let point = Point::new(x, top);
+        let point = Point::new(x, min_top);
         if check_right(rect(point)) {
             return Some(point);
         }
@@ -317,11 +321,11 @@ impl PlacementGroup {
             }
         };
 
-        let left = range.start.max(first.left.end().x).max(last.left.start().x);
-        let right = range.end.min(first.right.end().x).max(last.right.start().x);
+        let left = range.start.max(top_region.left.end().x).max(bot_region.left.start().x);
+        let right = range.end.min(top_region.right.end().x).max(bot_region.right.start().x);
 
-        check_border_mid(&first.left, right - size.width);
-        check_border_mid(&(mx * first.right), left);
+        check_border_mid(&top_region.left, right - size.width);
+        check_border_mid(&(mx * top_region.right), left);
 
         // ------------------------------------------------------------------ //
         // Try such that curves fit tightly with borders.
@@ -332,9 +336,9 @@ impl PlacementGroup {
             }
         };
 
-        check_all(first.left.intersect(&(mx * first.right), accuracy));
-        check_all(first.left.intersect(&(mx * my * last.right), accuracy));
-        check_all((my * last.left).intersect(&(mx * first.right), accuracy));
+        check_all(top_region.left.intersect(&(mx * top_region.right), accuracy));
+        check_all(top_region.left.intersect(&(mx * my * bot_region.right), accuracy));
+        check_all((my * bot_region.left).intersect(&(mx * top_region.right), accuracy));
 
         best
     }
