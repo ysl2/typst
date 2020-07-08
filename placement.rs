@@ -503,190 +503,229 @@ impl Region {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{BezPath, Rect};
+    use super::super::BezPath;
     use super::*;
 
-    fn _boxed(point: Point, size: Size) -> Rect {
-        Rect::from_points(point, point + size.to_vec2())
+    const TRAPEZ: &str     = "M20 100L40 20H80L100 100H20Z";
+    const SILO: &str       = "M20 100C20 100 28 32 40 20C52 8 66 8.5 80 20C94 31.5 100 100 100 100H20Z";
+    const RTAILPLANE: &str = "M38 100L16 20H52.5L113 100H38Z";
+    const LTAILPLANE: &str = "M20 100L65.5 20H99L83 100H20Z";
+    const SKEWED: &str     = "M65 100C23.5 65 59 48 16 20H52.5C90.6 29 113 66.5 113 100H65Z";
+    const HAT: &str        = "M65.5 27.5H21.5L29 64.5L15.5 104.5H98L80 64.5L65.5 27.5Z";
+    const HIGH_HEEL: &str  = "M65 26L45 26C45 26 52.3727 60.5 25 81.2597C5.38123 96.1388 22 141 22 141H63V81.2597L100.273 108.89V141H158.5C158.5 141 164.282 85.5 105 82.5C82.0353 81.3379 65 26 65 26Z";
+    const BUNTING: &str    = "M29.0452 86.5C27.5159 93.9653 26.1564 102.373 25 111.793L13 19H106.5L100.5 111.793C99.5083 103.022 97.8405 94.485 95.65 86.5C81.4874 34.8747 45.4731 6.3054 29.0452 86.5Z";
+    const BIRD: &str       = "M42.5 88.5L8.5 60.5L21.5 52.5L31.5 20H99L42.5 88.5Z";
+    const HAND: &str       = "M42.5 88.5L8.5 60.5V52.5H21.5L8.5 20H71.5L56.5 32.5L63 80L42.5 88.5Z" ;
+    const ARROW: &str      = "M90 61.5L53.5 74L28.5 58L54.5 20H77.5L72 45.5L90 61.5Z";
+    const ICEBERG: &str    = "M20 100L60.5 26.5L84 20L100 59L92.5 100H20Z";
+    const CANYON: &str     = "M100 80.5H43L20.5 50.25L11.5 20H102L100 80.5Z";
+
+    macro_rules! test {
+        ($name:ident
+            path: $path:expr,
+            min: $min:expr,
+            size: $size:expr,
+            point: $point:expr,
+            accuracy: $accuracy:expr,
+            tolerance: $tolerance:expr,
+        ) => {
+            #[test]
+            fn $name() {
+                let shape = BezPath::from_svg($path).unwrap();
+                let group = PlacementGroup::new(&shape, $accuracy);
+                let result = group.place($min, $size, $accuracy);
+                assert_approx_eq!(result, Some($point), tolerance = $tolerance);
+            }
+        }
     }
 
-    fn svg(path: &str) -> BezPath {
-        BezPath::from_svg(path).unwrap()
+    test! {
+        test_place_into_trapez
+            path: TRAPEZ,
+            min: Point::ZERO,
+            size: Size::new(50.0, 15.0),
+            point: Point::new(35.0, 40.0),
+            accuracy: 1e-2,
+            tolerance: 1e-2,
     }
 
-    fn hat() -> BezPath {
-        svg("M65.5 27.5H21.5L29 64.5L15.5 104.5H98L80 64.5L65.5 27.5Z")
+    test! {
+        test_place_into_trapez_with_min_x
+            path: TRAPEZ,
+            min: Point::new(60.0, 30.0),
+            size: Size::new(25.0, 10.0),
+            point: Point::new(60.0, 40.0),
+            accuracy: 1e-2,
+            tolerance: 1e-2,
     }
 
-    fn skewed_vase() -> BezPath {
-        svg("M65 100C23.5 65 59 48 16 20H52.5C90.6 29.07 113 66.5 113 100H65Z")
+    test! {
+        test_place_into_trapez_with_min_y
+            path: TRAPEZ,
+            min: Point::new(30.0, 56.0),
+            size: Size::new(30.0, 10.0),
+            point: Point::new(31.0, 56.0),
+            accuracy: 1e-2,
+            tolerance: 1e-2,
     }
 
-    fn weird_high_heel() -> BezPath {
-        svg("
-            M65 26L45 26C45 26 52.3727 60.5 25 81.2597C5.38123 96.1388 22 141
-            22 141H63V81.2597L100.273 108.89V141H158.5C158.5 141 164.282 85.5
-            105 82.5C82.0353 81.3379 65 26 65 26Z
-        ")
+    test! {
+        test_place_into_silo
+            path: SILO,
+            min: Point::ZERO,
+            size: Size::new(70.0, 30.0),
+            point: Point::new(25.5, 65.0),
+            accuracy: 1e-2,
+            tolerance: 0.5,
     }
 
-    #[test]
-    fn test_build_skewed_vase_group() {
-        let shape = skewed_vase();
-        let group = PlacementGroup::new(&shape, 1e-2);
-        assert_eq!(group.rows.len(), 1);
-        assert_eq!(group.regions.len(), 1);
+    test! {
+        test_place_into_rtailplane
+            path: RTAILPLANE,
+            min: Point::ZERO,
+            size: Size::new(40.0, 30.0),
+            point: Point::new(31.0, 45.0),
+            accuracy: 1e-2,
+            tolerance: 1.0,
     }
 
-    #[test]
-    fn test_build_banner_group() {
-        let shape = svg("
-            M29.0452 86.5001C27.5159 93.9653 26.1564 102.373 25 111.793L13
-            19H106.5L100.5 111.793C99.5083 103.022 97.8405 94.485 95.65
-            86.5C81.4874 34.8747 45.4731 6.3054 29.0452 86.5001Z
-        ");
-        let group = PlacementGroup::new(&shape, 1e-2);
-        assert_eq!(group.rows.len(), 3);
-        assert_eq!(group.regions.len(), 5);
+    test! {
+        test_place_into_ltailplane
+            path: LTAILPLANE,
+            min: Point::ZERO,
+            size: Size::new(38.0, 15.0),
+            point: Point::new(54.0, 40.0),
+            accuracy: 1e-2,
+            tolerance: 1.0,
     }
 
-    #[test]
-    fn test_build_strange_tower_group() {
-        let shape = svg("
-            M72 26H28C28 26 36.2035 48.2735 35.5 63C34.7133 79.4679 22 103 22
-            103H49.5V63L74.5 81.5V103H104.5C104.5 103 91.2926 90.5292 80.5
-            64.5C72 44 72 26 72 26Z
-        ");
-        let group = PlacementGroup::new(&shape, 1e-2);
-        assert_eq!(group.rows.len(), 5);
-        assert_eq!(group.regions.len(), 8);
+    test! {
+        test_place_into_skewed
+            path: SKEWED,
+            min: Point::ZERO,
+            size: Size::new(50.0, 17.0),
+            point: Point::new(41.5, 44.0),
+            accuracy: 1e-2,
+            tolerance: 0.25,
     }
 
-    #[test]
-    fn test_place_into_trapez() {
-        let shape = svg("M20 100L40 20H80L100 100H20Z");
-        let group = PlacementGroup::new(&shape, 1e-2);
-        assert_approx_eq!(
-            group.place(Point::ZERO, Size::new(50.0, 15.0), 1e-2),
-            Some(Point::new(35.0, 40.0)),
-            tolerance = 1e-2,
-        );
+    test! {
+        test_place_into_top_of_hat
+            path: HAT,
+            min: Point::ZERO,
+            size: Size::new(35.0, 30.0),
+            point: Point::new(28.0, 28.0),
+            accuracy: 1e-2,
+            tolerance: 1.0,
     }
 
-    #[test]
-    fn test_place_into_trapez_with_min_x() {
-        let shape = svg("M20 100L40 20H80L100 100H20Z");
-        let group = PlacementGroup::new(&shape, 1e-2);
-        assert_approx_eq!(
-            group.place(Point::new(60.0, 30.0), Size::new(25.0, 10.0), 1e-2),
-            Some(Point::new(60.0, 40.0)),
-            tolerance = 1e-2,
-        );
+    test! {
+        test_place_into_mid_of_hat
+            path: HAT,
+            min: Point::ZERO,
+            size: Size::new(43.0, 30.0),
+            point: Point::new(29.0, 44.0),
+            accuracy: 1e-2,
+            tolerance: 0.1,
     }
 
-    #[test]
-    fn test_place_into_trapez_with_min_y() {
-        let shape = svg("M20 100L40 20H80L100 100H20Z");
-        let group = PlacementGroup::new(&shape, 1e-2);
-        assert_approx_eq!(
-            group.place(Point::new(30.0, 56.0), Size::new(30.0, 10.0), 1e-2),
-            Some(Point::new(31.0, 56.0)),
-            tolerance = 1e-2,
-        );
+    test! {
+        test_place_into_bot_of_hat
+            path: HAT,
+            min: Point::ZERO,
+            size: Size::new(65.0, 12.0),
+            point: Point::new(23.0, 83.0),
+            accuracy: 1e-2,
+            tolerance: 1.0,
     }
 
-    #[test]
-    fn test_place_into_silo() {
-        let shape = svg("
-            M20 100C20 100 28 32 40 20C52 8.00005 66 8.5 80 20C94 31.5 100 100
-            100 100H20Z
-        ");
-        let group = PlacementGroup::new(&shape, 1e-2);
-        assert_approx_eq!(
-            group.place(Point::ZERO, Size::new(70.0, 30.0), 1e-2),
-            Some(Point::new(25.5, 65.0)),
-            tolerance = 0.5,
-        );
+    test! {
+        test_place_into_top_of_high_heel
+            path: HIGH_HEEL,
+            min: Point::ZERO,
+            size: Size::new(32.0, 12.0),
+            point: Point::new(44.0, 52.0),
+            accuracy: 1e-2,
+            tolerance: 1.0,
     }
 
-    #[test]
-    fn test_place_into_tailplane() {
-        let shape = svg("M38 100L16 20H52.5L113 100H38Z");
-        let group = PlacementGroup::new(&shape, 1e-2);
-        assert_approx_eq!(
-            group.place(Point::ZERO, Size::new(40.0, 30.0), 1e-2),
-            Some(Point::new(31.0, 45.0)),
-            tolerance = 1.0,
-        );
+    test! {
+        test_place_into_left_of_high_heel
+            path: HIGH_HEEL,
+            min: Point::new(0.0, 60.0),
+            size: Size::new(46.0, 17.0),
+            point: Point::new(17.0, 94.0),
+            accuracy: 1e-2,
+            tolerance: 0.5,
     }
 
-    #[test]
-    fn test_place_into_top_of_hat() {
-        let group = PlacementGroup::new(&hat(), 1e-2);
-        assert_approx_eq!(
-            group.place(Point::ZERO, Size::new(35.0, 30.0), 1e-2),
-            Some(Point::new(28.0, 28.0)),
-            tolerance = 1.0,
-        );
+    test! {
+        test_place_into_right_of_high_heel
+            path: HIGH_HEEL,
+            min: Point::ZERO,
+            size: Size::new(50.0, 17.0),
+            point: Point::new(100.0, 106.0),
+            accuracy: 1e-2,
+            tolerance: 1.0,
     }
 
-    #[test]
-    fn test_place_into_mid_of_hat() {
-        let group = PlacementGroup::new(&hat(), 1e-2);
-        assert_approx_eq!(
-            group.place(Point::ZERO, Size::new(43.0, 30.0), 1e-2),
-            Some(Point::new(29.0, 44.0)),
-            tolerance = 0.1,
-        );
+    test! {
+        test_place_into_bunting
+            path: BUNTING,
+            min: Point::ZERO,
+            size: Size::new(28.0, 19.0),
+            point: Point::new(15.5, 19.0),
+            accuracy: 1e-2,
+            tolerance: 1.0,
     }
 
-    #[test]
-    fn test_place_into_bot_of_hat() {
-        let group = PlacementGroup::new(&hat(), 1e-2);
-        assert_approx_eq!(
-            group.place(Point::ZERO, Size::new(65.0, 12.0), 1e-2),
-            Some(Point::new(23.0, 83.0)),
-            tolerance = 1.0,
-        );
+    test! {
+        test_place_into_bird
+            path: BIRD,
+            min: Point::ZERO,
+            size: Size::new(26.0, 39.0),
+            point: Point::new(32.0, 20.0),
+            accuracy: 1e-2,
+            tolerance: 1.0,
     }
 
-    #[test]
-    fn test_place_into_skewed_vase() {
-        let group = PlacementGroup::new(&skewed_vase(), 1e-2);
-        assert_approx_eq!(
-            group.place(Point::ZERO, Size::new(50.0, 17.0), 1e-2),
-            Some(Point::new(41.5, 44.0)),
-            tolerance = 0.25,
-        );
+    test! {
+        test_place_into_hand
+            path: HAND,
+            min: Point::ZERO,
+            size: Size::new(31.0, 42.0),
+            point: Point::new(21.5, 20.0),
+            accuracy: 1e-2,
+            tolerance: 1.0,
     }
 
-    #[test]
-    fn test_place_into_top_of_weird_high_heel() {
-        let group = PlacementGroup::new(&weird_high_heel(), 1e-2);
-        assert_approx_eq!(
-            group.place(Point::ZERO, Size::new(32.0, 12.0), 1e-2),
-            Some(Point::new(44.0, 52.0)),
-            tolerance = 1.0,
-        );
+    test! {
+        test_place_into_arrow
+            path: ARROW,
+            min: Point::ZERO,
+            size: Size::new(30.0, 15.0),
+            point: Point::new(42.0, 39.0),
+            accuracy: 1e-2,
+            tolerance: 1.0,
     }
 
-    #[test]
-    fn test_place_into_left_of_weird_high_heel() {
-        let group = PlacementGroup::new(&weird_high_heel(), 1e-2);
-        assert_approx_eq!(
-            group.place(Point::new(0.0, 60.0), Size::new(46.0, 17.0), 1e-2),
-            Some(Point::new(17.0, 94.0)),
-            tolerance = 0.5,
-        );
+    test! {
+        test_place_into_iceberg
+            path: ICEBERG,
+            min: Point::ZERO,
+            size: Size::new(53.0, 24.0),
+            point: Point::new(43.0, 58.0),
+            accuracy: 1e-2,
+            tolerance: 1.0,
     }
 
-    #[test]
-    fn test_place_into_right_of_weird_high_heel() {
-        let group = PlacementGroup::new(&weird_high_heel(), 1e-2);
-        assert_approx_eq!(
-            group.place(Point::ZERO, Size::new(50.0, 17.0), 1e-2),
-            Some(Point::new(100.0, 106.0)),
-            tolerance = 1.0,
-        );
+    test! {
+        test_place_into_canyon
+            path: CANYON,
+            min: Point::ZERO,
+            size: Size::new(53.0, 44.0),
+            point: Point::new(31.0, 20.0),
+            accuracy: 1e-2,
+            tolerance: 1.0,
     }
 }
