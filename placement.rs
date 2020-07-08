@@ -1,7 +1,7 @@
 //! Collisionless placement of objects.
 
 use arrayvec::ArrayVec;
-use std::cmp::Ordering;
+use super::range::value_relative_to_range;
 use super::{
     value_no_nans, value_approx, ApproxEq, BezPath, Monotone, PathSeg,
     ParamCurve, ParamCurveExtrema, ParamCurveSolve, Point, Range, Rect, Size,
@@ -94,12 +94,14 @@ impl PlacementGroup {
         size: Size,
         accuracy: f64,
     ) -> Option<Point> {
-        let s = self.find_first_row(min.y)?;
+        // Find out which row contains the minimum y coordinate or is the first
+        // one below it.
+        let start = self.find_topmost_row(min.y)?;
 
         // Walk over the rows where the top edge of the object can fall into.
         // The first candidate row is determined by the min-point's
         // `y`-coordinate.
-        for (i, top_row) in self.rows.iter().enumerate().skip(s) {
+        for (i, top_row) in self.rows.iter().enumerate().skip(start) {
             let min_top = top_row.top.max(min.y);
             let max_bot = top_row.bot;
             assert!(min_top <= max_bot);
@@ -148,16 +150,10 @@ impl PlacementGroup {
         None
     }
 
-    /// Find the first row which contains the `y` coordinate or is below it.
-    fn find_first_row(&self, y: f64) -> Option<usize> {
+    /// Find the topmost row which contains the `y` coordinate or is below it.
+    fn find_topmost_row(&self, y: f64) -> Option<usize> {
         match self.rows.binary_search_by(|row| {
-            if row.top > y {
-                Ordering::Greater
-            } else if row.bot <= y {
-                Ordering::Less
-            } else {
-                Ordering::Equal
-            }
+            value_relative_to_range(row.top .. row.bot, y)
         }) {
             Ok(i) => Some(i),
             Err(i) if i < self.rows.len() => Some(i),

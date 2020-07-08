@@ -1,8 +1,9 @@
 //! Floating-point ranges.
 
+use std::cmp::Ordering;
 use super::value_no_nans;
 
-/// A range from start to end.
+/// A float range.
 pub type Range = std::ops::Range<f64>;
 
 /// Simplifies a set of ranges into a run of non-overlapping intervals.
@@ -108,6 +109,18 @@ pub fn intersect(ranges: &[Vec<Range>]) -> Vec<Range> {
     }
 
     out
+}
+
+/// An comparison function which returns equal when a value falls into a range
+/// and less or greater when it is before or after the range.
+pub fn value_relative_to_range(range: Range, v: f64) -> Ordering {
+    if range.start > v {
+        Ordering::Greater
+    } else if range.end <= v {
+        Ordering::Less
+    } else {
+        Ordering::Equal
+    }
 }
 
 #[cfg(test)]
