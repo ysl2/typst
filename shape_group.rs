@@ -1,17 +1,14 @@
-//! Collisionless placement of objects.
-
 use arrayvec::ArrayVec;
 use super::range::value_relative_to_range;
-use super::{
-    value_no_nans, value_approx, ApproxEq, BezPath, Monotone, PathSeg,
-    ParamCurve, ParamCurveExtrema, ParamCurveSolve, Point, Range, Rect, Size,
-    TranslateScale, Vec2,
-};
+use super::*;
 
 /// A data structure for fast, collisionless placement of objects into a group
 /// of bezier shapes.
+///
+/// You can add free areas and blocked areas to the group. Objects can be placed
+/// into the union of the free areas minus the union of the blocked areas.
 #[derive(Debug, Clone)]
-pub struct PlacementGroup {
+pub struct ShapeGroup {
     /// The rows containing subslice range of its regions.
     rows: Vec<Row>,
     /// The regions row-by-row.
@@ -38,56 +35,193 @@ struct Region {
     right: Monotone<PathSeg>,
 }
 
-impl PlacementGroup {
-    /// Create a new placement group from a path.
-    ///
-    /// The tolerance is used to determine whether two `y` coordinates can be
-    /// considered equal or whether a row has to be created between them.
-    pub fn new(path: &BezPath, tolerance: f64) -> PlacementGroup {
-        let mut rows = vec![];
-        let mut regions = vec![];
+/// Whether a segment is old or new in an add operation.
+#[derive(Debug, Copy, Clone)]
+enum Kind {
+    Old,
+    New,
+}
 
-        // TODO: Multiple paths, inside & outside.
-        // TODO: Also split at intersections.
+type Splits = Vec<f64>;
+type Segment = Monotone<PathSeg>;
+type Monotones = Vec<(Segment, Kind)>;
 
-        let (monotonics, splits) = split_monotonics(path, tolerance);
-        let border_rows = split_into_rows(&monotonics, &splits, tolerance);
-
-        for mut borders in border_rows {
-            borders.sort_by(|a, b| value_no_nans(
-                &a.start().midpoint(a.end()).x,
-                &b.start().midpoint(b.end()).x,
-            ));
-
-            let start = regions.len();
-            let top = borders[0].start().y;
-            let bot = borders[0].end().y;
-
-            for c in borders.chunks_exact(2) {
-                regions.push(Region { left: c[0], right: c[1] });
-            }
-
-            rows.push(Row {
-                top,
-                bot,
-                idxs: start .. regions.len(),
-            });
+impl ShapeGroup {
+    /// Create a new shape group.
+    pub fn new() -> ShapeGroup {
+        ShapeGroup {
+            rows: vec![],
+            regions: vec![],
         }
-
-        PlacementGroup { rows, regions }
     }
 
-    /// Find the top-and-left-most position in the group to place an object with
-    /// the given `size`.
+    /// Add a new area into which objects can be placed (`blocks = false`) /
+    /// which objects need to evade (`blocks = true`)
+    pub fn add(&mut self, path: &BezPath, accuracy: f64, blocks: bool) {
+        // Split path into monotone subsegments and combine these with the old
+        // border segments (which are already monotone). Accumulates all `y`
+        // values at which curves need to be split such that all regions have
+        // two non-intersecting borders in the same vertical range.
+        let (monotone, splits) = self.split_monotone(path, accuracy);
+
+        // Applies the splits and returns rows of borders, which then need to be
+        // coalesced into regions.
+        let border_rows = Self::apply_splits(monotone, splits, accuracy);
+
+        // Combine borders into pairs such that in the end all regions in the
+        // shape will be created.
+        self.create_regions(border_rows, blocks);
+    }
+
+    /// Split the old borders and the new path into monotone segments.
+    fn split_monotone(&self, path: &BezPath, accuracy: f64) -> (Monotones, Splits) {
+        let mut splits = vec![];
+        let mut monotone = vec![];
+
+        // Re-add the splits for the existing rows.
+        for row in &self.rows {
+            splits.push(row.top);
+            splits.push(row.bot);
+        }
+
+        // Re-add the existing montone segments.
+        for region in &self.regions {
+            monotone.push((region.left, Kind::Old));
+            monotone.push((region.right, Kind::Old));
+        }
+
+        let old_curves = monotone.len();
+
+        // Split into monotone subsegments.
+        for seg in path.segments() {
+            for r in seg.extrema_ranges() {
+                let subseg = Monotone(seg.subsegment(r));
+                let (y1, y2) = (subseg.start().y, subseg.end().y);
+                let subseg = if y1 > y2 { subseg.reverse() } else { subseg };
+                monotone.push((subseg, Kind::New));
+                splits.push(y1);
+                splits.push(y2);
+            }
+        }
+
+        // Splits at intersection points.
+        for (i, (a, _)) in monotone.iter().enumerate().skip(old_curves) {
+            for (b, _) in &monotone[..i] {
+                for p in a.intersect::<[_; 3]>(b, accuracy) {
+                    splits.push(p.y);
+                }
+            }
+        }
+
+        // Make the splits unique.
+        splits.sort_by(value_no_nans);
+        splits.dedup_by(|a, b| a.approx_eq(&b, accuracy));
+
+        (monotone, splits)
+    }
+
+    /// Create rows of borders by splitting the monotones.
+    fn apply_splits(
+        monotone: Monotones,
+        splits: Splits,
+        accuracy: f64,
+    ) -> Vec<Monotones> {
+        // Fit the segments into rows of borders.
+        let len = splits.len().saturating_sub(1);
+        let mut borders = vec![vec![]; len];
+
+        for (seg, kind) in monotone {
+            let (y1, y2) = (seg.start().y, seg.end().y);
+            let find_k = |y| splits
+                .binary_search_by(|v| value_approx(&v, &y, accuracy))
+                .expect("splits should contain y");
+
+            // Find out in which row the segment start and in which it ends.
+            let k1 = find_k(y1);
+            let k2 = find_k(y2);
+            assert!(k1 <= k2);
+
+            // Check into how many rows the segment falls.
+            match k2 - k1 {
+                // The segment is horizontal and thus uninteresting.
+                0 => {}
+
+                // The segment falls into one row.
+                1 => borders[k1].push((seg, kind)),
+
+                // The segment falls into multiple rows. Add one subsegment for
+                // each row.
+                _ => {
+                    let mut t0 = 0.0;
+
+                    for ki in k1 + 1 .. k2 {
+                        let t = seg.solve_t_for_y(splits[ki])[0];
+                        borders[ki - 1].push((seg.subsegment(t0 .. t), kind));
+                        t0 = t;
+                    }
+
+                    borders[k2 - 1].push((seg.subsegment(t0 .. 1.0), kind));
+                }
+            }
+        }
+
+        borders
+    }
+
+    /// Create and store the rows & regions from the border rows.
+    fn create_regions(&mut self, border_rows: Vec<Monotones>, new_blocks: bool) {
+        self.rows.clear();
+        self.regions.clear();
+
+        // Coalesce borders into regions.
+        for row in border_rows {
+            let start = self.regions.len();
+
+            let any = try_opt_or!(row.first(), continue);
+            let top = any.0.start().y;
+            let bot = any.0.end().y;
+
+            let mut left = None;
+            let mut in_old = false;
+            let mut in_new = false;
+
+            for (border, kind) in row {
+                match kind {
+                    Kind::Old => in_old = !in_old,
+                    Kind::New => in_new = !in_new,
+                }
+
+                // Check whether we are inside of the group or outside now.
+                let inside = (!new_blocks && in_new) || (!in_new && in_old);
+                if inside {
+                    left = Some(border);
+                } else if let Some(left) = left {
+                    self.regions.push(Region { left, right: border })
+                }
+            }
+
+            let idxs = start .. self.regions.len();
+            self.rows.push(Row { top, bot, idxs });
+        }
+    }
+}
+
+impl ShapeGroup {
+    /// Place an object into the shape group.
     ///
-    /// Specifically, the following guarantees are made:
-    /// - When an object with the given `size` is placed such that its top-left
-    ///   corner coincides with the point, it does not collide with any shape in
-    ///   this group.
-    /// - The returned point `p` lies to the right and bottom of `min` (`p.x >=
-    ///   min.x` and `p.y >= min.y`).
-    /// - There exists no point further to the left or to the top for which the
-    ///   previous two guarantees are fulfilled.
+    /// This will find the top- and leftmost position in the shape group to
+    /// place an object with the given size. The object will not collide with
+    /// any shape in the group when placed at the returned point and it will be
+    /// placed to the right and top of `min`.
+    ///
+    /// In the following image, the blue rectangle would be placed at the red
+    /// point.
+    ///
+    /// <svg width="200" height="150" viewBox="0 0 200 150" fill="none">
+    /// <path d="M56 141L20 9H81L180 141H56Z" stroke="black" stroke-width="2"/>
+    /// <rect x="45" y="48" width="66" height="50" fill="#52A1FF"/>
+    /// <circle cx="45" cy="48" r="4" fill="#EC2B2B"/>
+    /// </svg>
     pub fn place(
         &self,
         min: Point,
@@ -124,7 +258,7 @@ impl PlacementGroup {
                 // Walk through the horizontal ranges where an object that
                 // starts in `t` and ends in `b` can be placed (these depend
                 // also on the rows in between `t` and `b`).
-                for (range, top_region, bot_region) in self.ranges(i, j, min.x) {
+                for (range, top_region, bot_region) in self.region_ranges(i, j, min.x) {
                     let point = self.try_place_into(
                         range,
                         min.y,
@@ -163,7 +297,7 @@ impl PlacementGroup {
 
     /// Returns all ranges and the top & bottom region they fall into,
     /// respectively, for top row `i` and bottom row `j`.
-    fn ranges(
+    fn region_ranges(
         &self,
         i: usize,
         j: usize,
@@ -338,124 +472,33 @@ impl PlacementGroup {
 
         best
     }
+}
 
+impl ShapeGroup {
+    /// Finds all horizontal ranges that are fully inside the shape group in the
+    /// given vertical range.
+    ///
+    /// In the following image, this would return the blue ranges when given
+    /// the vertical range defined by the two red lines.
+    ///
+    /// <svg width="300" height="160" viewBox="0 0 300 160" fill="none">
+    /// <rect x="58" y="46" width="53" height="79" fill="#52A1FF"/>
+    /// <rect x="162" y="46" width="72" height="79" fill="#52A1FF"/>
+    /// <path d="M32 154L67 6H259L228 154H177L117 35L108 154H32Z" stroke="black" stroke-width="2"/>
+    /// <line y1="45" x2="300" y2="45" stroke="#EC2B2B" stroke-width="2"/>
+    /// <line y1="125" x2="300" y2="125" stroke="#EC2B2B" stroke-width="2"/>
+    /// </svg>
+    pub fn ranges(&self, vrange: Range) -> impl IntoIterator<Item=Range> {
+        #![allow(unused)]
+        todo!("ranges");
+        std::iter::empty()
+    }
+}
+
+impl ShapeGroup {
     /// Returns all regions contained in row `i`.
     fn regions(&self, i: usize) -> &[Region] {
         &self.regions[self.rows[i].idxs.clone()]
-    }
-}
-
-/// Split the path into monotonic subsegments and return them and alongside all
-/// y-coordinates at which subsegments start and end.
-fn split_monotonics(
-    path: &BezPath,
-    tolerance: f64,
-) -> (Vec<Monotone<PathSeg>>, Vec<f64>) {
-    let mut monotonics = vec![];
-    let mut splits = vec![];
-
-    // Split curves into monotonic subsegments.
-    for seg in path.segments() {
-        splits.push(seg.start().y);
-
-        for r in seg.extrema_ranges() {
-            splits.push(seg.eval(r.end).y);
-            monotonics.push(Monotone(seg.subsegment(r)));
-        }
-    }
-
-    // Make the splits `y`-unique.
-    splits.sort_by(value_no_nans);
-    splits.dedup_by(|a, b| a.approx_eq(&b, tolerance));
-
-    (monotonics, splits)
-}
-
-/// Split monotonics segments into rows of subsegments such that no segment
-/// crosses a vertical split.
-fn split_into_rows(
-    monotonics: &[Monotone<PathSeg>],
-    splits: &[f64],
-    tolerance: f64,
-) -> Vec<Vec<Monotone<PathSeg>>> {
-    let len = splits.len();
-    let mut rows = vec![vec![]; if len > 0 { len - 1 } else { 0 }];
-
-    // Split curves at y values.
-    for &seg in monotonics {
-        let seg = if seg.start().y > seg.end().y {
-            seg.reverse()
-        } else {
-            seg
-        };
-
-        let top = seg.start().y;
-        let bot = seg.end().y;
-
-        let find_k_for_y = |y| {
-            splits.binary_search_by(|v| value_approx(&v, &y, tolerance))
-                .expect("splits does not contain y")
-        };
-
-        // Find start and end values in split list.
-        let k0 = find_k_for_y(top);
-        let k1 = find_k_for_y(bot);
-        assert!(k0 <= k1);
-
-        match k1 - k0 {
-            // The segment is horizontal and thus uninteresting.
-            0 => {}
-
-            // The segment does not need to be subdivided.
-            1 => rows[k0].push(seg),
-
-            // The segment has to be subdivided.
-            _ => {
-                let mut t_start = 0.0;
-                for ki in k0 + 1 .. k1 {
-                    let t = match seg.solve_t_for_y(splits[ki]).as_slice() {
-                        &[t] => t,
-                        _ => panic!("curve is not monotonic"),
-                    };
-
-                    rows[ki - 1].push(seg.subsegment(t_start .. t));
-                    t_start = t;
-                }
-
-                rows[k1 - 1].push(seg.subsegment(t_start .. 1.0));
-            }
-        }
-    }
-
-    // Delete empty rows.
-    rows.retain(|r| !r.is_empty());
-
-    rows
-}
-
-/// Tries to to find an `x` position at which the curve has the given `y` value.
-/// The `y` value is clamped into the valid y-range for the curve.
-///
-/// The curve must be monotonic and the min-max rectangle defined by start and
-/// end point must be a bounding box for the curve.
-fn solve_one_x<C>(seg: &Monotone<C>, y: f64, accuracy: f64) -> f64
-where
-    C: ParamCurveSolve
-{
-    let start = seg.start();
-    if y < start.y + accuracy {
-        return start.x;
-    }
-
-    let end = seg.end();
-    if y > end.y - accuracy {
-        return end.x;
-    }
-
-    match seg.solve_x_for_y(y).as_slice() {
-        [x] => *x,
-        [] => panic!("there should be at least one root"),
-        _ => panic!("curve is not monotone"),
     }
 }
 
@@ -501,6 +544,32 @@ impl Region {
     }
 }
 
+/// Tries to to find an `x` position at which the curve has the given `y` value.
+/// The `y` value is clamped into the valid y-range for the curve.
+///
+/// The curve must be monotonic and the min-max rectangle defined by start and
+/// end point must be a bounding box for the curve.
+fn solve_one_x<C>(seg: &Monotone<C>, y: f64, accuracy: f64) -> f64
+where
+    C: ParamCurveSolve
+{
+    let start = seg.start();
+    if y < start.y + accuracy {
+        return start.x;
+    }
+
+    let end = seg.end();
+    if y > end.y - accuracy {
+        return end.x;
+    }
+
+    match seg.solve_x_for_y(y).as_slice() {
+        [x] => *x,
+        [] => panic!("there should be at least one root"),
+        _ => panic!("curve is not monotone"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::BezPath;
@@ -532,7 +601,8 @@ mod tests {
             #[test]
             fn $name() {
                 let shape = BezPath::from_svg($path).unwrap();
-                let group = PlacementGroup::new(&shape, $accuracy);
+                let mut group = ShapeGroup::new();
+                group.add(&shape, $accuracy, false);
                 let result = group.place($min, $size, $accuracy);
                 assert_approx_eq!(result, Some($point), tolerance = $tolerance);
             }

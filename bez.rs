@@ -24,6 +24,10 @@ impl Monotone<PathSeg> {
     where
         A: Array<Item=Point>
     {
+        if !bboxes_overlap(self.bounding_box(), other.bounding_box()) {
+            return ArrayVec::new();
+        }
+
         match (self.0, other.0) {
             (seg, PathSeg::Line(line)) | (PathSeg::Line(line), seg) => {
                 seg.intersect_line(line)
@@ -119,7 +123,7 @@ where
     let bb = b.bounding_box();
 
     // When the bounding boxes don't overlap we have no intersection.
-    if ba.x1 < bb.x0 || bb.x1 < ba.x0 || ba.y1 < bb.y0 || bb.y1 < ba.y0 {
+    if !bboxes_overlap(ba, bb) {
         return result;
     }
 
@@ -159,6 +163,10 @@ where
     extend(find_intersections_bbox(&a2, &b2, accuracy));
 
     result
+}
+
+fn bboxes_overlap(ba: Rect, bb: Rect) -> bool {
+    ba.x1 > bb.x0 && bb.x1 > ba.x0 && ba.y1 > bb.y0 && bb.y1 > ba.y0
 }
 
 /// A parameterized curve that can solve its `t` values for a coordinate value.
@@ -288,7 +296,10 @@ fn filter_t(vec: ArrayVec<impl Array<Item=f64>>) -> ArrayVec<[f64; MAX_SOLVE]> {
 
 /// Additional methods for path segments.
 pub trait PathSegExt {
+    /// Apply an affine transformation.
     fn apply_affine(self, affine: Affine) -> Self;
+
+    /// Apply a translate-scale transformation.
     fn apply_translate_scale(self, ts: TranslateScale) -> Self;
 }
 

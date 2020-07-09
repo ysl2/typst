@@ -6,8 +6,7 @@ mod bez;
 mod dim;
 mod flex;
 mod scale;
-
-pub mod placement;
+mod shape_group;
 pub mod range;
 
 use std::cmp::Ordering;
@@ -20,6 +19,7 @@ pub use dim::{Dim, VDim};
 pub use flex::Flex;
 pub use range::Range;
 pub use scale::Scale;
+pub use shape_group::ShapeGroup;
 
 /// Root-finding for polynomials up to degree 3.
 pub mod roots {
@@ -42,8 +42,7 @@ pub mod roots {
 pub use kurbo::{
     Affine, BezPath, Circle, CubicBez, Ellipse, Insets, Line, PathEl, PathSeg,
     ParamCurve, ParamCurveExtrema, Point, QuadBez, Rect, RoundedRect, Shape,
-    Size, SvgParseError, TranslateScale, Vec2,
-    MAX_EXTREMA,
+    Size, SvgParseError, TranslateScale, Vec2, MAX_EXTREMA,
 };
 
 /// A comparison function for partial orderings which panics with
