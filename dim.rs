@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::fmt;
-use super::range::Range;
+use super::Range;
 
 /// Dimensions (_width_ / _height_ / _depth_) of an object with baseline.
 #[derive(Default, Copy, Clone, PartialEq)]

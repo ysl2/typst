@@ -54,7 +54,7 @@ pub fn value_no_nans<T: PartialOrd>(a: &T, b: &T) -> Ordering {
     a.partial_cmp(b).expect("encountered nan in comparison")
 }
 
-/// An comparison function which returns equal when a value falls into a range
+/// A comparison function which returns equal when a value falls into a range
 /// and less or greater when it is before or after the range.
 pub fn position(range: Range, v: f64) -> Ordering {
     if range.start > v {
