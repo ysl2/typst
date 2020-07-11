@@ -1,4 +1,5 @@
 use arrayvec::ArrayVec;
+use smallvec::SmallVec;
 use super::*;
 
 /// A data structure for fast, collisionless placement of objects into a group
@@ -439,7 +440,7 @@ impl ShapeGroup {
         let mut done = false;
         let mut top_regions = self.regions(i);
         let mut bot_regions = self.regions(j);
-        let mut mid_regions: Vec<_> = (i + 1 .. j)
+        let mut mid_regions: SmallVec<[_; 3]> = (i + 1 .. j)
             .map(|m| self.regions(m))
             .collect();
 
