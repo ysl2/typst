@@ -87,11 +87,19 @@ fn solve_cubic_t_for_v(
     p3: f64,
     v: f64,
 ) -> ArrayVec<[f64; MAX_SOLVE]> {
+    const EPSILON: f64 = 1e-6;
+
     let c3 = -p0 + 3.0 * p1 - 3.0 * p2 + p3;
     let c2 = 3.0 * p0 - 6.0 * p1 + 3.0 * p2;
     let c1 = -3.0 * p0 + 3.0 * p1;
     let c0 = p0 - v;
-    filter_t(roots::solve_cubic(c0, c1, c2, c3))
+
+    // Solve quadratic to prevent loss of precision when c3 is very small.
+    if c3.abs() < EPSILON {
+        filter_t(roots::solve_quadratic(c0, c1, c2))
+    } else {
+        filter_t(roots::solve_cubic(c0, c1, c2, c3))
+    }
 }
 
 /// Find all `t` values matching `v` for a quadratic curve.
