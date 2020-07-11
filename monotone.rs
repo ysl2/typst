@@ -211,6 +211,12 @@ impl Mul<Monotone<PathSeg>> for TranslateScale {
     }
 }
 
+impl<C: ApproxEq> ApproxEq for Monotone<C> {
+    fn approx_eq(&self, other: &Self, tolerance: f64) -> bool {
+        self.0.approx_eq(&other.0, tolerance)
+    }
+}
+
 impl<C> std::ops::Deref for Monotone<C> {
     type Target = C;
 

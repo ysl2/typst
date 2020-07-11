@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use super::value_no_nans;
+use super::*;
 
 /// Trait for approximate floating point comparisons.
 pub trait ApproxEq {
@@ -53,14 +53,33 @@ macro_rules! impl_approx_eq {
 }
 
 impl_approx_eq!(std::ops::Range<f64> [start, end]);
-impl_approx_eq!(super::Point [x, y]);
-impl_approx_eq!(super::Vec2 [x, y]);
-impl_approx_eq!(super::Size [width, height]);
-impl_approx_eq!(super::Insets [x0, x1, y0, y1]);
-impl_approx_eq!(super::Line [p0, p1]);
-impl_approx_eq!(super::QuadBez [p0, p1, p2]);
-impl_approx_eq!(super::CubicBez [p0, p1, p2, p3]);
-impl_approx_eq!(super::Rect [x0, y0, x1, y1]);
+
+impl_approx_eq!(Point [x, y]);
+impl_approx_eq!(Vec2 [x, y]);
+impl_approx_eq!(Size [width, height]);
+impl_approx_eq!(Insets [x0, x1, y0, y1]);
+impl_approx_eq!(Line [p0, p1]);
+impl_approx_eq!(QuadBez [p0, p1, p2]);
+impl_approx_eq!(CubicBez [p0, p1, p2, p3]);
+impl_approx_eq!(Rect [x0, y0, x1, y1]);
+
+impl ApproxEq for PathSeg {
+    /// Compares the control points directly if both curves are of the same
+    /// kind or converts to cubic and compares control points then if not.
+    ///
+    /// Please note that this can still return `false` when the two segments
+    /// coincide, because two different sets of control points can induce the
+    /// same curve.
+    fn approx_eq(&self, other: &Self, tolerance: f64) -> bool {
+        use PathSeg::*;
+        match (self, other) {
+            (Line(a), Line(b)) => a.approx_eq(&b, tolerance),
+            (Quad(a), Quad(b)) => a.approx_eq(&b, tolerance),
+            (Cubic(a), Cubic(b)) => a.approx_eq(&b, tolerance),
+            (a, b) => a.to_cubic().approx_eq(&b.to_cubic(), tolerance),
+        }
+    }
+}
 
 /// A comparison function for floats which returns equal when the the values are
 /// approximately equal and falls back to `value_no_nans` otherwise.

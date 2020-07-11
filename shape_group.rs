@@ -12,6 +12,8 @@ pub struct ShapeGroup {
     rows: Vec<Row>,
     /// The regions row-by-row.
     regions: Vec<Region>,
+    /// The accuracy used to construct this group.
+    accuracy: f64,
 }
 
 /// A top- and bot-bounded row of regions.
@@ -43,10 +45,11 @@ type Monotones = Vec<(Segment, Kind)>;
 
 impl ShapeGroup {
     /// Create a new shape group.
-    pub fn new() -> ShapeGroup {
+    pub fn new(accuracy: f64) -> ShapeGroup {
         ShapeGroup {
             rows: vec![],
             regions: vec![],
+            accuracy,
         }
     }
 
@@ -58,16 +61,16 @@ impl ShapeGroup {
     /// have no immediate effect. Adding a non-blocking path later will not
     /// bring them back. It is recommended to add non-blocking paths first and
     /// blocking ones later.
-    pub fn add(&mut self, path: &BezPath, accuracy: f64, blocks: bool) {
+    pub fn add(&mut self, path: &BezPath, blocks: bool) {
         // Split path into monotone subsegments and combine these with the old
         // border segments (which are already monotone). Accumulates all `y`
         // values at which curves need to be split such that all regions have
         // two non-intersecting borders in the same vertical range.
-        let (monotone, splits) = self.split_monotone(path, accuracy);
+        let (monotone, splits) = self.split_monotone(path);
 
         // Applies the splits and returns rows of borders, which then need to be
         // coalesced into regions.
-        let border_rows = Self::apply_splits(monotone, splits, accuracy);
+        let border_rows = self.apply_splits(monotone, splits);
 
         // Combine borders into pairs such that in the end all regions in the
         // shape will be created.
@@ -75,7 +78,7 @@ impl ShapeGroup {
     }
 
     /// Split the old borders and the new path into monotone segments.
-    fn split_monotone(&self, path: &BezPath, accuracy: f64) -> (Monotones, Splits) {
+    fn split_monotone(&self, path: &BezPath) -> (Monotones, Splits) {
         let mut splits = vec![];
         let mut monotone = vec![];
 
@@ -108,7 +111,7 @@ impl ShapeGroup {
         // Split at intersection points.
         for (i, (a, _)) in monotone.iter().enumerate().skip(old_curves) {
             for (b, _) in &monotone[..i] {
-                for p in a.intersect::<[_; 3]>(b, accuracy) {
+                for p in a.intersect::<[_; 3]>(b, self.accuracy) {
                     splits.push(p.y);
                 }
             }
@@ -116,16 +119,16 @@ impl ShapeGroup {
 
         // Make the splits unique.
         splits.sort_by(value_no_nans);
-        splits.dedup_by(|a, b| a.approx_eq(&b, accuracy));
+        splits.dedup_by(|a, b| a.approx_eq(&b, self.accuracy));
 
         (monotone, splits)
     }
 
     /// Create rows of borders by splitting the monotones.
     fn apply_splits(
+        &self,
         monotone: Monotones,
         splits: Splits,
-        accuracy: f64,
     ) -> Vec<Monotones> {
         // Fit the segments into rows of borders.
         let len = splits.len().saturating_sub(1);
@@ -134,7 +137,7 @@ impl ShapeGroup {
         for (seg, kind) in monotone {
             let (top, bot) = (seg.start().y, seg.end().y);
             let find_k = |y| splits
-                .binary_search_by(|v| value_approx(&v, &y, accuracy))
+                .binary_search_by(|v| value_approx(&v, &y, self.accuracy))
                 .expect("splits should contain y");
 
             // Find out in which row the segment starts and in which it ends.
@@ -175,7 +178,7 @@ impl ShapeGroup {
         self.regions.clear();
 
         // Coalesce borders into regions.
-        for row in border_rows {
+        for mut row in border_rows {
             let start = self.regions.len();
 
             let any = try_opt_or!(row.first(), continue);
@@ -186,6 +189,13 @@ impl ShapeGroup {
             let mut in_old = false;
             let mut in_new = false;
 
+            // Sort the borders from left to right.
+            //
+            // Use the midpoints of the curve because the x-coordinate can be
+            // equal at start and end, but in the middle they should be
+            // different because we would have found an intersection otherwise.
+            row.sort_by(|a, b| value_no_nans(&a.0.eval(0.5).x, &b.0.eval(0.5).x));
+
             for (border, kind) in row {
                 match kind {
                     Kind::Old => in_old = !in_old,
@@ -194,15 +204,25 @@ impl ShapeGroup {
 
                 // Check whether we are inside of the group or outside now.
                 let inside = (!new_blocks && in_new) || (!in_new && in_old);
+
                 if inside {
-                    left = Some(border);
-                } else if let Some(left) = left {
-                    self.regions.push(Region { left, right: border })
+                    if left.is_none() {
+                        left = Some(border);
+                    }
+                } else {
+                    if let Some(left) = left.take() {
+                        let right = border;
+                        if !left.approx_eq(&right, self.accuracy) {
+                            self.regions.push(Region { left, right: border });
+                        }
+                    }
                 }
             }
 
-            let idxs = start .. self.regions.len();
-            self.rows.push(Row { top, bot, idxs });
+            let end = self.regions.len();
+            if end > start {
+                self.rows.push(Row { top, bot, idxs: start .. end });
+            }
         }
     }
 }
@@ -223,27 +243,20 @@ impl ShapeGroup {
     /// <rect x="45" y="48" width="66" height="50" fill="#52A1FF"/>
     /// <circle cx="45" cy="48" r="4" fill="#EC2B2B"/>
     /// </svg>
-    pub fn place(
-        &self,
-        min: Point,
-        size: Size,
-        accuracy: f64,
-    ) -> Option<Point> {
+    pub fn place(&self, min: Point, size: Size) -> Option<Point> {
         // Find out at which row we need to start our search.
         let start = self.find_first_row(min.y)?;
 
         for (i, top_row) in self.rows.iter().enumerate().skip(start) {
-            let top = top_row.top.max(min.y);
-            let bot = top_row.bot;
-
+            let min_top = top_row.top.max(min.y);
             for (j, bot_row) in self.rows.iter().enumerate().skip(i) {
                 // Too far to the top - is a middle row.
-                if top + size.height > bot_row.bot {
+                if min_top + size.height > bot_row.bot {
                     continue;
                 }
 
                 // Too far to the bottom - cannot end here.
-                if bot + size.height < bot_row.top {
+                if top_row.bot + size.height < bot_row.top {
                     break;
                 }
 
@@ -271,7 +284,7 @@ impl ShapeGroup {
                         r = left .. right;
                     }
 
-                    let point = self.try_place(top, r, t, b, size, accuracy);
+                    let point = self.try_place(top, r, t, b, size);
                     if let Some(p) = point {
                         if topmost.map(|tm| p.y < tm.y).unwrap_or(true) {
                             topmost = point;
@@ -296,16 +309,15 @@ impl ShapeGroup {
         t: &Region,
         b: &Region,
         size: Size,
-        accuracy: f64,
     ) -> Option<Point> {
         // Ensure that the range is wide enough to hold the object.
-        if r.end - r.start + accuracy < size.width {
+        if r.end - r.start + self.accuracy < size.width {
             return None;
         }
 
         // The rectangle occupied by the object when placed at `p`.
         let bounds = |p| Rect::from_points(p, p + size.to_vec2())
-            .inset((-2.0 * accuracy, 0.0));
+            .inset((-2.0 * self.accuracy, 0.0));
 
         // Check placing directly at the top.
         let top_x = r.start
@@ -336,7 +348,7 @@ impl ShapeGroup {
         for (left, right) in &pairs {
             // Skip left segments which are completely to the left of min.
             if left.right_point().x > r.start {
-                points.extend(left.intersect::<[_; 3]>(right, accuracy));
+                points.extend(left.intersect::<[_; 3]>(right, self.accuracy));
             }
         }
 
@@ -350,7 +362,7 @@ impl ShapeGroup {
 
         // Check the points from top to bottom and left to right.
         points.sort_by(|a, b| {
-            value_approx(&a.y, &b.y, accuracy)
+            value_approx(&a.y, &b.y, self.accuracy)
                 .then_with(|| value_no_nans(&a.x, &b.x))
         });
 
@@ -358,8 +370,8 @@ impl ShapeGroup {
         for p in points {
             let rect = bounds(p);
             let fits =
-                top < rect.y0 + accuracy
-                && rect.y1 < b.bot() + accuracy
+                top < rect.y0 + self.accuracy
+                && rect.y1 < b.bot() + self.accuracy
                 && rect.x0 > r.start
                 && rect.x1 < r.end
                 && t.fits(rect)
@@ -382,9 +394,9 @@ impl ShapeGroup {
     /// vertical range defined by the two red lines.
     ///
     /// <svg width="300" height="160" viewBox="0 0 300 160" fill="none">
+    /// <path d="M32 154L67 6H259L228 154H177L117 35L108 154H32Z" stroke="black" stroke-width="2"/>
     /// <rect x="58" y="46" width="53" height="79" fill="#52A1FF"/>
     /// <rect x="162" y="46" width="72" height="79" fill="#52A1FF"/>
-    /// <path d="M32 154L67 6H259L228 154H177L117 35L108 154H32Z" stroke="black" stroke-width="2"/>
     /// <line y1="45" x2="300" y2="45" stroke="#EC2B2B" stroke-width="2"/>
     /// <line y1="125" x2="300" y2="125" stroke="#EC2B2B" stroke-width="2"/>
     /// </svg>
@@ -430,6 +442,16 @@ impl ShapeGroup {
         let mut mid_regions: Vec<_> = (i + 1 .. j)
             .map(|m| self.regions(m))
             .collect();
+
+        // Ensure that the rows are contiguous.
+        let mut last_bot = self.rows[i].bot;
+        for row in &self.rows[i ..= j] {
+            if row.top > last_bot + self.accuracy {
+                done = true;
+                break;
+            }
+            last_bot = row.bot;
+        }
 
         // Compute the subranges which are inside the shape for the top region,
         // all middle rows and the bottom region.
@@ -507,7 +529,7 @@ impl Region {
 
     /// The free horizontal range at this vertical range.
     fn range(&self, vr: Range) -> Range {
-        self.left.solve_max_x(vr.clone()) .. self.right.solve_max_x(vr)
+        self.left.solve_max_x(vr.clone()) .. self.right.solve_min_x(vr)
     }
 
     /// The maximal horizontal range (which surrounds the borders).
@@ -538,9 +560,10 @@ impl Region {
 
 #[cfg(test)]
 mod tests {
-    use super::super::BezPath;
     use super::*;
 
+    const RECT: &str       = "M32 35H92V95H32V35Z";
+    const GAP_RECTS: &str  = "M17 21H77V31H17V21ZM17 37H77V47H17V37Z";
     const TRAPEZ: &str     = "M20 100L40 20H80L100 100H20Z";
     const SILO: &str       = "M20 100C20 100 28 32 40 20C52 8 66 8.5 80 20C94 31.5 100 100 100 100H20Z";
     const RTAILPLANE: &str = "M38 100L16 20H52.5L113 100H38Z";
@@ -551,11 +574,156 @@ mod tests {
     const BUNTING: &str    = "M29.0452 86.5C27.5159 93.9653 26.1564 102.373 25 111.793L13 19H106.5L100.5 111.793C99.5083 103.022 97.8405 94.485 95.65 86.5C81.4874 34.8747 45.4731 6.3054 29.0452 86.5Z";
     const BIRD: &str       = "M42.5 88.5L8.5 60.5L21.5 52.5L31.5 20H99L42.5 88.5Z";
     const HAND: &str       = "M42.5 88.5L8.5 60.5V52.5H21.5L8.5 20H71.5L56.5 32.5L63 80L42.5 88.5Z" ;
-    const ARROW: &str      = "M90 61.5L53.5 74L28.5 58L54.5 20H77.5L72 45.5L90 61.5Z";
+    const ARROW: &str      = "M118 112L81 124L56 108L82 70H105L100 96L118 112Z";
     const ICEBERG: &str    = "M20 100L60.5 26.5L84 20L100 59L92.5 100H20Z";
     const CANYON: &str     = "M100 80.5H43L20.5 50.25L11.5 20H102L100 80.5Z";
 
-    macro_rules! test {
+    const RANGE_EXAMPLE: &str           = "M32 154L67 6H259L228 154H177L117 35L108 154H32Z";
+    const COMPLEX_COMBINATIONS: &str    = "M15 13L10 53V113H115L107 55L97 16L15 13ZM28 86C23.8897 77.4238 24.0788 67.3044 32 62C37.5441 58.2875 43.1394 57.8052 49 61C58.0072 65.9101 57.8465 78.5969 52 87C48.1487 92.5355 43.5461 96.6998 37 95C32.0314 93.7098 30.2107 90.6126 28 86ZM75 92C63.9003 81.7541 77 54 77 54L92 63C92 63 96.7092 73.5217 97 81C97.2695 87.9287 99.6519 94.9456 94 99C87.457 103.694 80.9136 97.4587 75 92Z";
+    const SHAPE_SELF_INTERSECTING: &str = "M35 10C54.93 0.66 81.26 8.94 88 30C94.74 51 91.6 83.97 79 92C66.41 100.025 56.5 96 52 77.5C47.5 59 88.95 52.2009 106 59C123 65.8 112.6 105.201 97 115C75.5 128.5 58.35 129.26 35 115C10.16 99.83 4 72.1173 12 44C16.36 28.6 20.6 16.7567 35 10Z";
+    const CURVE_SELF_INTERSECTING: &str = "M91 25C-44.3443 133 174.934 133 27 25H91Z";
+
+    fn path(svg: &str) -> BezPath {
+        BezPath::from_svg(svg).unwrap()
+    }
+
+    // ---------------------------------------------------------------------- //
+    // These tests check shape group construction from one or multiple shapes.
+
+    macro_rules! test_build {
+        ($name:ident
+            paths: [$($path:expr => $blocks:expr),* $(,)?],
+            accuracy: $accuracy:expr,
+            rows: $rows:expr,
+            regions: $regions:expr,
+        ) => {
+            #[test]
+            fn $name() {
+                #[allow(unused_mut)]
+                let mut group = ShapeGroup::new($accuracy);
+                $(group.add(&path($path), $blocks);)*
+                assert_eq!(group.rows.len(), $rows);
+                assert_eq!(group.regions.len(), $regions);
+            }
+        }
+    }
+
+    test_build! {
+        test_build_group_without_any_shapes_is_empty
+            paths: [],
+            accuracy: 1e-2,
+            rows: 0,
+            regions: 0,
+    }
+
+    test_build! {
+        test_build_group_from_one_simple_shape_that_has_only_one_region
+            paths: [TRAPEZ => false],
+            accuracy: 1e-2,
+            rows: 1,
+            regions: 1,
+    }
+
+    test_build! {
+        test_build_group_with_only_blocking_shapes_is_empty
+            paths: [BUNTING => true, RTAILPLANE => true],
+            accuracy: 1e-2,
+            rows: 0,
+            regions: 0,
+    }
+
+    test_build! {
+        test_build_group_from_union_of_shape_and_contained_shape
+            paths: [TRAPEZ => false, SILO => false],
+            accuracy: 1e-2,
+            rows: 2,
+            regions: 2,
+    }
+
+    test_build! {
+        test_build_group_from_union_of_overlapping_shapes
+            paths: [LTAILPLANE => false, RTAILPLANE => false],
+            accuracy: 1e-2,
+            rows: 4,
+            regions: 5,
+    }
+
+    test_build! {
+        test_build_group_from_union_of_nonoverlapping_shapes
+            paths: [BIRD => false, ARROW => false],
+            accuracy: 1e-2,
+            rows: 8,
+            regions: 9,
+    }
+
+    test_build! {
+        test_build_group_from_difference_of_overlapping_shapes
+            paths: [BUNTING => false, RTAILPLANE => true],
+            accuracy: 1e-2,
+            rows: 9,
+            regions: 15,
+    }
+
+    test_build! {
+        test_build_group_from_difference_of_non_overlapping_shapes
+            paths: [BIRD => false, ARROW => true],
+            accuracy: 1e-2,
+            rows: 4,
+            regions: 4,
+    }
+
+    test_build! {
+        test_build_group_from_shape_with_self_intersection
+            paths: [SHAPE_SELF_INTERSECTING => false],
+            accuracy: 0.1,
+            rows: 14,
+            regions: 21,
+    }
+
+    test_build! {
+        test_build_group_from_shape_with_self_intersecting_curve
+            paths: [CURVE_SELF_INTERSECTING => false],
+            accuracy: 1e-2,
+            rows: 4,
+            regions: 4,
+    }
+
+    test_build! {
+        test_build_group_from_difference_of_shape_with_itself
+            paths: [BIRD => false, BIRD => true],
+            accuracy: 1e-2,
+            rows: 0,
+            regions: 0,
+    }
+
+    // ---------------------------------------------------------------------- //
+    // These tests check all different combinations of borders & regions which
+    // influence placement.
+
+    // In the following table there is a list of which test tests what. The
+    // `left` column specifies which part of the left border blocks the shape
+    // and `right` which part of the right border. When there is an `x` in the
+    // `right` column, the right border does not block at all, which means that
+    // the object can be placed at the top. The `top = bot` column says of
+    // the object was placed into a single row.
+    //
+    // left | right | top = bot | tests
+    // -----|-------|-----------|-----------------------------------------
+    // top  |   x   |   true    | trapez_top, hat_top
+    // top  |  top  |   true    | trapez_mid, silo, hat_bot, high_heel_top,
+    //                          | self-intersecting
+    // top  |  bot  |   true    | ltailplane
+    // bot  |  top  |   true    | rtailplane, skewed
+    // top  |   x   |   false   | bird
+    // mid  |   x   |   false   | hand
+    // bot  |   x   |   false   | bunting, canyon
+    // top  |  top  |   false   | high_heel_left
+    // top  |  mid  |   false   | arrow
+    // top  |  bot  |   false   | iceberg
+    // mid  |  top  |   false   | hat_mid
+    // bot  |  top  |   false   | high_heel_right
+
+    macro_rules! test_place {
         ($name:ident
             path: $path:expr,
             min: $min:expr,
@@ -566,222 +734,322 @@ mod tests {
         ) => {
             #[test]
             fn $name() {
-                let shape = BezPath::from_svg($path).unwrap();
-                let mut group = ShapeGroup::new();
-                group.add(&shape, $accuracy, false);
-                let result = group.place($min, $size, $accuracy);
-                assert_approx_eq!(result, Some($point), tolerance = $tolerance);
+                let shape = path($path);
+                let mut group = ShapeGroup::new($accuracy);
+                group.add(&shape, false);
+                let result = group.place($min, $size);
+                assert_approx_eq!(result, $point, tolerance = $tolerance);
             }
         }
     }
 
-    test! {
+    test_place! {
+        test_place_into_rect_fits
+            path: RECT,
+            min: Point::ZERO,
+            size: Size::new(40.0, 20.0),
+            point: Some(Point::new(32.0, 35.0)),
+            accuracy: 1e-2,
+            tolerance: 1e-2,
+    }
+
+    test_place! {
+        test_place_into_rect_fits_exactly
+            path: RECT,
+            min: Point::ZERO,
+            size: Size::new(60.0, 60.0),
+            point: Some(Point::new(32.0, 35.0)),
+            accuracy: 1e-2,
+            tolerance: 1e-2,
+    }
+
+    test_place! {
+        test_place_into_rect_does_not_fit
+            path: RECT,
+            min: Point::ZERO,
+            size: Size::new(30.0, 61.0),
+            point: None,
+            accuracy: 1e-2,
+            tolerance: 1e-2,
+    }
+
+    test_place! {
+        test_place_into_gap_rects_does_not_fit
+            path: GAP_RECTS,
+            min: Point::ZERO,
+            size: Size::new(30.0, 20.0),
+            point: None,
+            accuracy: 1e-2,
+            tolerance: 1e-2,
+    }
+
+    test_place! {
         test_place_into_trapez
             path: TRAPEZ,
             min: Point::ZERO,
             size: Size::new(50.0, 15.0),
-            point: Point::new(35.0, 40.0),
+            point: Some(Point::new(35.0, 40.0)),
             accuracy: 1e-2,
             tolerance: 1e-2,
     }
 
-    test! {
+    test_place! {
         test_place_into_trapez_top
             path: TRAPEZ,
             min: Point::ZERO,
             size: Size::new(20.0, 12.0),
-            point: Point::new(40.0, 20.0),
+            point: Some(Point::new(40.0, 20.0)),
             accuracy: 1e-2,
             tolerance: 1e-2,
     }
 
-    test! {
+    test_place! {
         test_place_into_trapez_with_min_x
             path: TRAPEZ,
             min: Point::new(60.0, 30.0),
             size: Size::new(25.0, 10.0),
-            point: Point::new(60.0, 40.0),
+            point: Some(Point::new(60.0, 40.0)),
             accuracy: 1e-2,
             tolerance: 1e-2,
     }
 
-    test! {
+    test_place! {
         test_place_into_trapez_with_min_y
             path: TRAPEZ,
             min: Point::new(30.0, 56.0),
             size: Size::new(30.0, 10.0),
-            point: Point::new(31.0, 56.0),
+            point: Some(Point::new(31.0, 56.0)),
             accuracy: 1e-2,
             tolerance: 1e-2,
     }
 
-    test! {
+    test_place! {
         test_place_into_trapez_top_with_min_x
             path: TRAPEZ,
             min: Point::new(60.0, 30.0),
             size: Size::new(20.0, 10.0),
-            point: Point::new(60.0, 30.0),
+            point: Some(Point::new(60.0, 30.0)),
             accuracy: 1e-2,
             tolerance: 1e-2,
     }
 
-    test! {
+    test_place! {
         test_place_into_silo
             path: SILO,
             min: Point::ZERO,
             size: Size::new(70.0, 30.0),
-            point: Point::new(25.5, 65.0),
+            point: Some(Point::new(25.5, 65.0)),
             accuracy: 1e-2,
             tolerance: 0.5,
     }
 
-    test! {
+    test_place! {
         test_place_into_rtailplane
             path: RTAILPLANE,
             min: Point::ZERO,
             size: Size::new(40.0, 30.0),
-            point: Point::new(31.0, 45.0),
+            point: Some(Point::new(31.0, 45.0)),
             accuracy: 1e-2,
             tolerance: 1.0,
     }
 
-    test! {
+    test_place! {
         test_place_into_ltailplane
             path: LTAILPLANE,
             min: Point::ZERO,
             size: Size::new(38.0, 15.0),
-            point: Point::new(54.0, 40.0),
+            point: Some(Point::new(54.0, 40.0)),
             accuracy: 1e-2,
             tolerance: 1.0,
     }
 
-    test! {
+    test_place! {
         test_place_into_skewed
             path: SKEWED,
             min: Point::ZERO,
             size: Size::new(50.0, 17.0),
-            point: Point::new(41.5, 44.0),
+            point: Some(Point::new(41.5, 44.0)),
             accuracy: 1e-2,
             tolerance: 0.25,
     }
 
-    test! {
-        test_place_into_top_of_hat
+    test_place! {
+        test_place_into_hat_top
             path: HAT,
             min: Point::ZERO,
             size: Size::new(35.0, 30.0),
-            point: Point::new(28.0, 28.0),
+            point: Some(Point::new(28.0, 28.0)),
             accuracy: 1e-2,
             tolerance: 1.0,
     }
 
-    test! {
-        test_place_into_mid_of_hat
+    test_place! {
+        test_place_into_hat_mid
             path: HAT,
             min: Point::ZERO,
             size: Size::new(43.0, 30.0),
-            point: Point::new(29.0, 44.0),
+            point: Some(Point::new(29.0, 44.0)),
             accuracy: 1e-2,
             tolerance: 0.1,
     }
 
-    test! {
-        test_place_into_bot_of_hat
+    test_place! {
+        test_place_into_hat_bot
             path: HAT,
             min: Point::ZERO,
             size: Size::new(65.0, 12.0),
-            point: Point::new(23.0, 83.0),
+            point: Some(Point::new(23.0, 83.0)),
             accuracy: 1e-2,
             tolerance: 1.0,
     }
 
-    test! {
-        test_place_into_top_of_high_heel
+    test_place! {
+        test_place_into_high_heel_top
             path: HIGH_HEEL,
             min: Point::ZERO,
             size: Size::new(32.0, 12.0),
-            point: Point::new(44.0, 52.0),
+            point: Some(Point::new(44.0, 52.0)),
             accuracy: 1e-2,
             tolerance: 1.0,
     }
 
-    test! {
-        test_place_into_left_of_high_heel
+    test_place! {
+        test_place_into_high_heel_left
             path: HIGH_HEEL,
             min: Point::new(0.0, 60.0),
             size: Size::new(46.0, 17.0),
-            point: Point::new(17.0, 94.0),
+            point: Some(Point::new(17.0, 94.0)),
             accuracy: 1e-2,
             tolerance: 0.5,
     }
 
-    test! {
-        test_place_into_right_of_high_heel
+    test_place! {
+        test_place_into_high_heel_right
             path: HIGH_HEEL,
             min: Point::ZERO,
             size: Size::new(50.0, 17.0),
-            point: Point::new(100.0, 106.0),
+            point: Some(Point::new(100.0, 106.0)),
             accuracy: 1e-2,
             tolerance: 1.0,
     }
 
-    test! {
+    test_place! {
         test_place_into_bunting
             path: BUNTING,
             min: Point::ZERO,
             size: Size::new(28.0, 19.0),
-            point: Point::new(15.5, 19.0),
+            point: Some(Point::new(15.5, 19.0)),
             accuracy: 1e-2,
             tolerance: 1.0,
     }
 
-    test! {
+    test_place! {
         test_place_into_bird
             path: BIRD,
             min: Point::ZERO,
             size: Size::new(26.0, 39.0),
-            point: Point::new(32.0, 20.0),
+            point: Some(Point::new(32.0, 20.0)),
             accuracy: 1e-2,
             tolerance: 1.0,
     }
 
-    test! {
+    test_place! {
         test_place_into_hand
             path: HAND,
             min: Point::ZERO,
             size: Size::new(31.0, 42.0),
-            point: Point::new(21.5, 20.0),
+            point: Some(Point::new(21.5, 20.0)),
             accuracy: 1e-2,
             tolerance: 1.0,
     }
 
-    test! {
+    test_place! {
         test_place_into_arrow
             path: ARROW,
             min: Point::ZERO,
             size: Size::new(30.0, 15.0),
-            point: Point::new(42.0, 39.0),
+            point: Some(Point::new(70.0, 87.5)),
             accuracy: 1e-2,
-            tolerance: 1.0,
+            tolerance: 0.1,
     }
 
-    test! {
+    test_place! {
         test_place_into_iceberg
             path: ICEBERG,
             min: Point::ZERO,
             size: Size::new(53.0, 24.0),
-            point: Point::new(42.5, 59.0),
+            point: Some(Point::new(42.5, 59.0)),
             accuracy: 1e-2,
             tolerance: 0.25,
     }
 
-    test! {
+    test_place! {
         test_place_into_canyon
             path: CANYON,
             min: Point::ZERO,
             size: Size::new(53.0, 44.0),
-            point: Point::new(31.0, 20.0),
+            point: Some(Point::new(31.0, 20.0)),
             accuracy: 1e-2,
             tolerance: 1.0,
+    }
+
+    test_place! {
+        test_place_into_shape_self_intersecting_with_min
+            path: SHAPE_SELF_INTERSECTING,
+            min: Point::new(50.0, 48.0),
+            size: Size::new(22.0, 17.0),
+            point: Some(Point::new(91.0, 66.0)),
+            accuracy: 1e-2,
+            tolerance: 1.0,
+    }
+
+    // ---------------------------------------------------------------------- //
+    // These tests check the combinations & ranges.
+
+    #[test]
+    fn test_middle_ranges_for_complex_combinations() {
+        let mut group = ShapeGroup::new(1e-2);
+        group.add(&path(COMPLEX_COMBINATIONS), false);
+        assert_approx_eq!(
+            group.combinations(1, 20).map(|t| t.1).collect::<Vec<_>>(),
+            vec![10.0 .. 25.35, 56.1 .. 70.5, 97.7 .. 106.5],
+            tolerance = 0.1,
+        );
+    }
+
+    #[test]
+    fn test_bunting_ranges() {
+        let mut group = ShapeGroup::new(1e-2);
+        group.add(&path(BUNTING), false);
+        assert_approx_eq!(
+            group.ranges(30.0 .. 54.0).collect::<Vec<_>>(),
+            vec![17.5 .. 39.5, 81.5 .. 104.5],
+            tolerance = 0.5,
+        );
+    }
+
+    #[test]
+    fn test_example_ranges() {
+        let mut group = ShapeGroup::new(1e-2);
+        group.add(&path(RANGE_EXAMPLE), false);
+        assert_approx_eq!(
+            group.ranges(46.0 .. 126.0).collect::<Vec<_>>(),
+            vec![58.0 .. 111.0, 162.0 .. 234.0],
+            tolerance = 1.0,
+        );
+    }
+
+    #[test]
+    fn test_ranges_with_vertical_ranges_out_of_row() {
+        let mut group = ShapeGroup::new(1e-2);
+        group.add(&path(RECT), false);
+        assert_eq!(group.ranges(30.0 .. 60.0).next(), None);
+    }
+
+    #[test]
+    fn test_ranges_with_vertical_gap() {
+        let mut group = ShapeGroup::new(1e-2);
+        group.add(&path(GAP_RECTS), false);
+        assert_eq!(group.ranges(25.0 .. 40.0).next(), None);
     }
 }

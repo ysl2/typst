@@ -32,7 +32,7 @@ where
     }
 }
 
-impl<T: ApproxEq> ApproxEq for Scale<T>{
+impl<T: ApproxEq> ApproxEq for Scale<T> {
     fn approx_eq(&self, other: &Self, tolerance: f64) -> bool {
         match (self, other) {
             (Scale::Abs(x), Scale::Abs(y)) => x.approx_eq(y, tolerance),
