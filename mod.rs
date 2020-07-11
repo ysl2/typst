@@ -10,17 +10,6 @@ mod scale;
 mod shape_group;
 mod solve;
 
-use std::cmp::Ordering;
-
-pub use approx::{ApproxEq, value_approx};
-pub use dim::{Dim, VDim};
-pub use flex::Flex;
-pub use intersect::find_intersections_bbox;
-pub use monotone::Monotone;
-pub use scale::Scale;
-pub use shape_group::ShapeGroup;
-pub use solve::{ParamCurveSolve, MAX_SOLVE};
-
 /// Root-finding for polynomials up to degree 3.
 pub mod roots {
     use arrayvec::ArrayVec;
@@ -38,6 +27,17 @@ pub mod roots {
         return result;
     }
 }
+
+use std::cmp::Ordering;
+
+pub use approx::{ApproxEq, value_approx};
+pub use dim::{Dim, VDim};
+pub use flex::Flex;
+pub use intersect::find_intersections_bbox;
+pub use monotone::Monotone;
+pub use scale::Scale;
+pub use shape_group::ShapeGroup;
+pub use solve::{ParamCurveSolve, MAX_SOLVE};
 
 pub use kurbo::{
     Affine, BezPath, Circle, CubicBez, Ellipse, Insets, Line, PathEl, PathSeg,

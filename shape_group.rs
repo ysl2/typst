@@ -1,5 +1,4 @@
 use arrayvec::ArrayVec;
-use super::range::value_relative_to_range;
 use super::*;
 
 /// A data structure for fast, collisionless placement of objects into a group
@@ -9,7 +8,7 @@ use super::*;
 /// into the union of the free areas minus the union of the blocked areas.
 #[derive(Debug, Clone)]
 pub struct ShapeGroup {
-    /// The rows containing subslice range of its regions.
+    /// The rows which are made up of subslice ranges of the regions.
     rows: Vec<Row>,
     /// The regions row-by-row.
     regions: Vec<Region>,
@@ -35,13 +34,9 @@ struct Region {
     right: Monotone<PathSeg>,
 }
 
-/// Whether a segment is old or new in an add operation.
-#[derive(Debug, Copy, Clone)]
-enum Kind {
-    Old,
-    New,
-}
-
+// Types for shape group construction.
+#[derive(Copy, Clone)]
+enum Kind { Old, New }
 type Splits = Vec<f64>;
 type Segment = Monotone<PathSeg>;
 type Monotones = Vec<(Segment, Kind)>;
@@ -56,7 +51,13 @@ impl ShapeGroup {
     }
 
     /// Add a new area into which objects can be placed (`blocks = false`) /
-    /// which objects need to evade (`blocks = true`)
+    /// which objects need to evade (`blocks = true`).
+    ///
+    /// **Note:** When blocking objects are added all path segments which do not
+    /// fall into previously added non-blocking paths are discarded because they
+    /// have no immediate effect. Adding a non-blocking path later will not
+    /// bring them back. It is recommended to add non-blocking paths first and
+    /// blocking ones later.
     pub fn add(&mut self, path: &BezPath, accuracy: f64, blocks: bool) {
         // Split path into monotone subsegments and combine these with the old
         // border segments (which are already monotone). Accumulates all `y`
@@ -104,7 +105,7 @@ impl ShapeGroup {
             }
         }
 
-        // Splits at intersection points.
+        // Split at intersection points.
         for (i, (a, _)) in monotone.iter().enumerate().skip(old_curves) {
             for (b, _) in &monotone[..i] {
                 for p in a.intersect::<[_; 3]>(b, accuracy) {
@@ -131,36 +132,36 @@ impl ShapeGroup {
         let mut borders = vec![vec![]; len];
 
         for (seg, kind) in monotone {
-            let (y1, y2) = (seg.start().y, seg.end().y);
+            let (top, bot) = (seg.start().y, seg.end().y);
             let find_k = |y| splits
                 .binary_search_by(|v| value_approx(&v, &y, accuracy))
                 .expect("splits should contain y");
 
-            // Find out in which row the segment start and in which it ends.
-            let k1 = find_k(y1);
-            let k2 = find_k(y2);
-            assert!(k1 <= k2);
+            // Find out in which row the segment starts and in which it ends.
+            let i = find_k(top);
+            let j = find_k(bot);
+            debug_assert!(i <= j);
 
             // Check into how many rows the segment falls.
-            match k2 - k1 {
+            match j - i {
                 // The segment is horizontal and thus uninteresting.
                 0 => {}
 
                 // The segment falls into one row.
-                1 => borders[k1].push((seg, kind)),
+                1 => borders[i].push((seg, kind)),
 
                 // The segment falls into multiple rows. Add one subsegment for
                 // each row.
                 _ => {
                     let mut t0 = 0.0;
 
-                    for ki in k1 + 1 .. k2 {
-                        let t = seg.solve_t_for_y(splits[ki])[0];
-                        borders[ki - 1].push((seg.subsegment(t0 .. t), kind));
+                    for k in i + 1 .. j {
+                        let t = seg.solve_one_t_for_y(splits[k]);
+                        borders[k - 1].push((seg.subsegment(t0 .. t), kind));
                         t0 = t;
                     }
 
-                    borders[k2 - 1].push((seg.subsegment(t0 .. 1.0), kind));
+                    borders[j - 1].push((seg.subsegment(t0 .. 1.0), kind));
                 }
             }
         }
@@ -228,55 +229,58 @@ impl ShapeGroup {
         size: Size,
         accuracy: f64,
     ) -> Option<Point> {
-        // Find out which row contains the minimum y coordinate or is the first
-        // one below it.
-        let start = self.find_topmost_row(min.y)?;
+        // Find out at which row we need to start our search.
+        let start = self.find_first_row(min.y)?;
 
-        // Walk over the rows where the top edge of the object can fall into.
-        // The first candidate row is determined by the min-point's
-        // `y`-coordinate.
         for (i, top_row) in self.rows.iter().enumerate().skip(start) {
-            let min_top = top_row.top.max(min.y);
-            let max_bot = top_row.bot;
-            assert!(min_top <= max_bot);
+            let top = top_row.top.max(min.y);
+            let bot = top_row.bot;
 
-            // Walk over the bottom rows where an object starting in `top_row`
-            // can end in.
             for (j, bot_row) in self.rows.iter().enumerate().skip(i) {
                 // Too far to the top - is a middle row.
-                if min_top + size.height > bot_row.bot {
+                if top + size.height > bot_row.bot {
                     continue;
                 }
 
                 // Too far to the bottom - cannot end here.
-                if max_bot + size.height < bot_row.top {
+                if bot + size.height < bot_row.top {
                     break;
                 }
 
-                let mut best: Option<Point> = None;
+                // The topmost solution found in this row combination.
+                let mut topmost: Option<Point> = None;
 
-                // Walk through the horizontal ranges where an object that
-                // starts in `t` and ends in `b` can be placed (these depend
-                // also on the rows in between `t` and `b`).
-                for (range, top_region, bot_region) in self.region_ranges(i, j, min.x) {
-                    let point = self.try_place_into(
-                        range,
-                        min.y,
-                        size,
-                        top_region,
-                        bot_region,
-                        accuracy
-                    );
+                for (t, m, b) in self.combinations(i, j) {
+                    // Ensure that the object is placed to the right and bottom
+                    // of `min`.
+                    let top = min.y.max(t.top());
+                    let mut r = min.x.max(m.start) .. m.end;
 
+                    // Shrink the range when we have a middle row because we
+                    // then know that the bottom end of the top region and
+                    // top end of the bottom region are tight.
+                    if i != j {
+                        let left = r.start
+                            .max(t.left.end().x)
+                            .max(b.left.start().x);
+
+                        let right = r.end
+                            .min(t.right.end().x)
+                            .min(b.right.start().x);
+
+                        r = left .. right;
+                    }
+
+                    let point = self.try_place(top, r, t, b, size, accuracy);
                     if let Some(p) = point {
-                        if best.map(|b| p.y < b.y).unwrap_or(true) {
-                            best = point;
+                        if topmost.map(|tm| p.y < tm.y).unwrap_or(true) {
+                            topmost = point;
                         }
                     }
                 }
 
-                if best.is_some() {
-                    return best;
+                if topmost.is_some() {
+                    return topmost;
                 }
             }
         }
@@ -284,27 +288,142 @@ impl ShapeGroup {
         None
     }
 
-    /// Find the topmost row which contains the `y` coordinate or is below it.
-    fn find_topmost_row(&self, y: f64) -> Option<usize> {
-        match self.rows.binary_search_by(|row| {
-            value_relative_to_range(row.top .. row.bot, y)
-        }) {
-            Ok(i) => Some(i),
-            Err(i) if i < self.rows.len() => Some(i),
-            _ => None,
+    /// Try to place the object into the given combination of regions.
+    fn try_place(
+        &self,
+        top: f64,
+        r: Range,
+        t: &Region,
+        b: &Region,
+        size: Size,
+        accuracy: f64,
+    ) -> Option<Point> {
+        // Ensure that the range is wide enough to hold the object.
+        if r.end - r.start + accuracy < size.width {
+            return None;
         }
+
+        // The rectangle occupied by the object when placed at `p`.
+        let bounds = |p| Rect::from_points(p, p + size.to_vec2())
+            .inset((-2.0 * accuracy, 0.0));
+
+        // Check placing directly at the top.
+        let top_x = r.start
+            .max(t.left.solve_max_x(top .. top + size.height))
+            .max(b.left.solve_max_x(top .. top + size.height));
+
+        let top_point = Point::new(top_x, top);
+        let rect = bounds(top_point);
+
+        if t.fits_right(rect) && b.fits_right(rect) {
+            return Some(top_point);
+        }
+
+        // If it does not fit at the top, we have to try all ways in which the#
+        // object could hit the borders and find the topmost one.
+        let mut points = ArrayVec::<[Point; 11]>::new();
+
+        // Check placing such that the object hits one of the curves at
+        // the top and the bottom.
+        let mx = TranslateScale::translate(Vec2::new(-size.width, 0.0));
+        let my = TranslateScale::translate(Vec2::new(0.0, -size.height));
+        let pairs = [
+            (t.left, mx * t.right),
+            (t.left, mx * my * b.right),
+            (my * b.left, mx * t.right)
+        ];
+
+        for (left, right) in &pairs {
+            // Skip left segments which are completely to the left of min.
+            if left.right_point().x > r.start {
+                points.extend(left.intersect::<[_; 3]>(right, accuracy));
+            }
+        }
+
+        // Check placing such that the object hits one of the curves at the top
+        // and one end of the range in the middle.
+        let x1 = r.end - size.width;
+        points.push(Point::new(x1, t.left.solve_one_y_for_x(x1)));
+
+        let x2 = r.start;
+        points.push(Point::new(x2, t.right.solve_one_y_for_x(x2 + size.width)));
+
+        // Check the points from top to bottom and left to right.
+        points.sort_by(|a, b| {
+            value_approx(&a.y, &b.y, accuracy)
+                .then_with(|| value_no_nans(&a.x, &b.x))
+        });
+
+        // Find and verify the best position.
+        for p in points {
+            let rect = bounds(p);
+            let fits =
+                top < rect.y0 + accuracy
+                && rect.y1 < b.bot() + accuracy
+                && rect.x0 > r.start
+                && rect.x1 < r.end
+                && t.fits(rect)
+                && b.fits(rect);
+
+            if fits {
+                return Some(p);
+            }
+        }
+
+        None
+    }
+}
+
+impl ShapeGroup {
+    /// Find all horizontal ranges that are fully inside the shape group in the
+    /// given vertical range.
+    ///
+    /// In the following image, this would return the blue ranges when given the
+    /// vertical range defined by the two red lines.
+    ///
+    /// <svg width="300" height="160" viewBox="0 0 300 160" fill="none">
+    /// <rect x="58" y="46" width="53" height="79" fill="#52A1FF"/>
+    /// <rect x="162" y="46" width="72" height="79" fill="#52A1FF"/>
+    /// <path d="M32 154L67 6H259L228 154H177L117 35L108 154H32Z" stroke="black" stroke-width="2"/>
+    /// <line y1="45" x2="300" y2="45" stroke="#EC2B2B" stroke-width="2"/>
+    /// <line y1="125" x2="300" y2="125" stroke="#EC2B2B" stroke-width="2"/>
+    /// </svg>
+    pub fn ranges<'a>(
+        &'a self,
+        vr: Range
+    ) -> impl Iterator<Item=Range> + 'a {
+        struct MaybeIterator<I>(Option<I>);
+
+        impl<I: Iterator<Item=Range>> Iterator for MaybeIterator<I> {
+            type Item = Range;
+
+            fn next(&mut self) -> Option<Range> {
+                self.0.as_mut().and_then(|iter| iter.next())
+            }
+        }
+
+        let maybe_i = self.find_row(vr.start);
+        let maybe_j = self.find_row(vr.end);
+
+        MaybeIterator(maybe_i.and_then(move |i| maybe_j.map(move |j| {
+            self.combinations(i, j)
+                .map(move |(t, r, b)| {
+                    let tr = t.range(vr.clone());
+                    let br = b.range(vr.clone());
+
+                    r.start.max(tr.start).max(br.start)
+                    .. r.end.min(tr.end).min(br.end)
+                })
+        })))
     }
 
-    /// Returns all ranges and the top & bottom region they fall into,
-    /// respectively, for top row `i` and bottom row `j`.
-    fn region_ranges(
+    /// All overlapping combinations of top regions in row `i`, middle ranges
+    /// and bottom regions in rows `i` and `j`, which are inside the shape.
+    fn combinations(
         &self,
         i: usize,
         j: usize,
-        min_x: f64,
-    ) -> impl Iterator<Item=(Range, &Region, &Region)> {
-        assert!(i <= j);
-
+    ) -> impl Iterator<Item=(&Region, Range, &Region)> {
         let mut done = false;
         let mut top_regions = self.regions(i);
         let mut bot_regions = self.regions(j);
@@ -312,26 +431,28 @@ impl ShapeGroup {
             .map(|m| self.regions(m))
             .collect();
 
-        // Compute the subranges where there is a region for all rows - which is
-        // basically the intersection between the row's regions.
+        // Compute the subranges which are inside the shape for the top region,
+        // all middle rows and the bottom region.
+        // This computes the intersection of the top & bottom regions outer
+        // ranges with the middle regions inner ranges.
         std::iter::from_fn(move || loop {
             if done {
                 return None;
             }
 
             let (t, b) = (&top_regions[0], &bot_regions[0]);
-            let (to, bo) = (t.outer(), b.outer());
+            let (tr, br) = (t.max_range(), b.max_range());
 
-            let mut start = min_x.max(to.start).max(bo.start);
-            let mut end = to.end.min(bo.end);
-            let mut min = if to.end < bo.end {
+            let mut start = tr.start.max(br.start);
+            let mut end = tr.end.min(br.end);
+            let mut min = if tr.end < br.end {
                 &mut top_regions
             } else {
                 &mut bot_regions
             };
 
             for m in &mut mid_regions {
-                let range = m[0].inner();
+                let range = m[0].min_range();
                 min = if range.end < end { m } else { min };
                 start = start.max(range.start);
                 end = end.min(range.end);
@@ -341,161 +462,32 @@ impl ShapeGroup {
             done = min.is_empty();
 
             if start < end {
-                return Some((start .. end, t, b));
+                return Some((t, start .. end, b));
             }
         })
     }
-
-    /// Try to place the object into the given range, starting in region `top_region`
-    /// and ending in region `bot_region`.
-    fn try_place_into(
-        &self,
-        range: Range,
-        min_y: f64,
-        size: Size,
-        top_region: &Region,
-        bot_region: &Region,
-        accuracy: f64,
-    ) -> Option<Point> {
-        // The object cannot fit if the range is not wide enough.
-        if range.end - range.start + accuracy < size.width {
-            return None;
-        }
-
-        // The rectangle occupied by the object when placed at `p`.
-        let rect = |p| {
-            Rect::from_points(p, p + size.to_vec2())
-                .inset((-2.0 * accuracy, 0.0))
-        };
-
-        let solve_max_x = |seg: &Monotone<PathSeg>, range: Range| {
-            solve_one_x(seg, range.start, accuracy)
-                .max(solve_one_x(seg, range.end, accuracy))
-        };
-
-        let solve_min_x = |seg: &Monotone<PathSeg>, range: Range| {
-            solve_one_x(seg, range.start, accuracy)
-                .min(solve_one_x(seg, range.end, accuracy))
-        };
-
-        // Check that the rectangle does not collide with the left borders.
-        let check_left = |rect: Rect| {
-            rect.x0 > range.start
-            && rect.x0 > solve_max_x(&top_region.left, rect.y0 .. rect.y1)
-            && rect.x0 > solve_max_x(&bot_region.left, rect.y0 .. rect.y1)
-        };
-
-        // Check that the rectangle does not collide with the right borders.
-        let check_right = |rect: Rect| {
-            rect.x1 < range.end
-            && rect.x1 < solve_min_x(&top_region.right, rect.y0 .. rect.y1)
-            && rect.x1 < solve_min_x(&bot_region.right, rect.y0 .. rect.y1)
-        };
-
-        // Check that the rectangle does not collide with the top & bottom end
-        // of the row.
-        let min_top = top_region.top().max(min_y);
-        let check_top_bot = |rect: Rect| {
-            min_top < rect.y0 + accuracy && bot_region.bot() > rect.y1 - accuracy
-        };
-
-        // ------------------------------------------------------------------ //
-        // Try placing directly at the top border.
-
-        // Find out the x-position for placing at the top border.
-        let x = range.start
-            .max(solve_max_x(&top_region.left, min_top .. min_top + size.height))
-            .max(solve_max_x(&bot_region.left, min_top .. min_top + size.height));
-
-        // If it fits at the top, it ain't getting better.
-        let point = Point::new(x, min_top);
-        if check_right(rect(point)) {
-            return Some(point);
-        }
-
-        // ------------------------------------------------------------------ //
-        // If it won't fit at the top, search for the left and top-most place.
-        // The best current candidate is `best`.
-
-        let mut best: Option<Point> = None;
-        let mut check = |point: Point| {
-            // Check that we even want that solution before verifying it.
-            if let Some(b) = best {
-                if b.y < point.y {
-                    return;
-                }
-
-                if b.y.approx_eq(&point.y, accuracy) && b.x < point.x {
-                    return;
-                }
-            }
-
-            let rect = rect(point);
-            if check_left(rect) && check_right(rect) && check_top_bot(rect) {
-                best = Some(point);
-            }
-        };
-
-        let mx = TranslateScale::translate(Vec2::new(-size.width, 0.0));
-        let my = TranslateScale::translate(Vec2::new(0.0, -size.height));
-
-        // ------------------------------------------------------------------ //
-        // Try such that curve fits tightly with one of the borders and with a
-        // middle row on the other side.
-
-        let mut check_border_mid = |seg: &Monotone<PathSeg>, x| {
-            match seg.solve_t_for_x(x).as_slice() {
-                [] => {}
-                [t] => check(seg.eval(*t)),
-                _ => panic!("curve is not monotone"),
-            }
-        };
-
-        let left = range.start.max(top_region.left.end().x).max(bot_region.left.start().x);
-        let right = range.end.min(top_region.right.end().x).max(bot_region.right.start().x);
-
-        check_border_mid(&top_region.left, right - size.width);
-        check_border_mid(&(mx * top_region.right), left);
-
-        // ------------------------------------------------------------------ //
-        // Try such that curves fit tightly with borders.
-
-        let mut check_all = |points: ArrayVec<[Point; 3]>| {
-            for p in points {
-                check(p);
-            }
-        };
-
-        check_all(top_region.left.intersect(&(mx * top_region.right), accuracy));
-        check_all(top_region.left.intersect(&(mx * my * bot_region.right), accuracy));
-        check_all((my * bot_region.left).intersect(&(mx * top_region.right), accuracy));
-
-        best
-    }
 }
 
 impl ShapeGroup {
-    /// Finds all horizontal ranges that are fully inside the shape group in the
-    /// given vertical range.
-    ///
-    /// In the following image, this would return the blue ranges when given
-    /// the vertical range defined by the two red lines.
-    ///
-    /// <svg width="300" height="160" viewBox="0 0 300 160" fill="none">
-    /// <rect x="58" y="46" width="53" height="79" fill="#52A1FF"/>
-    /// <rect x="162" y="46" width="72" height="79" fill="#52A1FF"/>
-    /// <path d="M32 154L67 6H259L228 154H177L117 35L108 154H32Z" stroke="black" stroke-width="2"/>
-    /// <line y1="45" x2="300" y2="45" stroke="#EC2B2B" stroke-width="2"/>
-    /// <line y1="125" x2="300" y2="125" stroke="#EC2B2B" stroke-width="2"/>
-    /// </svg>
-    pub fn ranges(&self, vrange: Range) -> impl IntoIterator<Item=Range> {
-        #![allow(unused)]
-        todo!("ranges");
-        std::iter::empty()
+    /// Find the row which contains the y-coordinate.
+    fn find_row(&self, y: f64) -> Option<usize> {
+        self.binary_search_row(y).ok()
     }
-}
 
-impl ShapeGroup {
+    /// Find the row which contains the y-coordinate or the topmost one below it.
+    fn find_first_row(&self, y: f64) -> Option<usize> {
+        match self.binary_search_row(y) {
+            Ok(i) => Some(i),
+            Err(i) if i < self.rows.len() => Some(i),
+            _ => None,
+        }
+    }
+
+    /// Binary search for the row which contains the `y` position.
+    fn binary_search_row(&self, y: f64) -> Result<usize, usize> {
+        self.rows.binary_search_by(|row| position(row.top .. row.bot, y))
+    }
+
     /// Returns all regions contained in row `i`.
     fn regions(&self, i: usize) -> &[Region] {
         &self.regions[self.rows[i].idxs.clone()]
@@ -513,60 +505,34 @@ impl Region {
         self.left.end().y
     }
 
-    /// The horizontal range which surrounds the borders.
-    fn outer(&self) -> Range {
-        self.left_min() .. self.right_max()
+    /// The free horizontal range at this vertical range.
+    fn range(&self, vr: Range) -> Range {
+        self.left.solve_max_x(vr.clone()) .. self.right.solve_max_x(vr)
     }
 
-    /// The horizontal range which is surrounded by the borders.
-    fn inner(&self) -> Range {
-        self.left_max() .. self.right_min()
+    /// The maximal horizontal range (which surrounds the borders).
+    fn max_range(&self) -> Range {
+        self.left.left_point().x .. self.right.right_point().x
     }
 
-    /// The maximum x value of the left border.
-    fn left_max(&self) -> f64 {
-        self.left.start().x.max(self.left.end().x)
+    /// The minimal horizontal range (which is surrounded by the borders).
+    fn min_range(&self) -> Range {
+        self.left.right_point().x .. self.right.left_point().x
     }
 
-    /// The minimum x value of the left border.
-    fn left_min(&self) -> f64 {
-        self.left.start().x.min(self.left.end().x)
+    /// Whether the object fits in between the two borders.
+    fn fits(&self, rect: Rect) -> bool {
+        self.fits_left(rect) && self.fits_right(rect)
     }
 
-    /// The maximum x value of the right border.
-    fn right_max(&self) -> f64 {
-        self.right.start().x.max(self.right.end().x)
+    /// Whether the rect is to the right of the left border.
+    fn fits_left(&self, rect: Rect) -> bool {
+        rect.x0 > self.left.solve_max_x(rect.y0 .. rect.y1)
     }
 
-    /// The minimum x value of the right border.
-    fn right_min(&self) -> f64 {
-        self.right.start().x.min(self.right.end().x)
-    }
-}
-
-/// Tries to to find an `x` position at which the curve has the given `y` value.
-/// The `y` value is clamped into the valid y-range for the curve.
-///
-/// The curve must be monotonic and the min-max rectangle defined by start and
-/// end point must be a bounding box for the curve.
-fn solve_one_x<C>(seg: &Monotone<C>, y: f64, accuracy: f64) -> f64
-where
-    C: ParamCurveSolve
-{
-    let start = seg.start();
-    if y < start.y + accuracy {
-        return start.x;
-    }
-
-    let end = seg.end();
-    if y > end.y - accuracy {
-        return end.x;
-    }
-
-    match seg.solve_x_for_y(y).as_slice() {
-        [x] => *x,
-        [] => panic!("there should be at least one root"),
-        _ => panic!("curve is not monotone"),
+    /// Whether the rect is to the left of the right border.
+    fn fits_right(&self, rect: Rect) -> bool {
+        rect.x1 < self.right.solve_min_x(rect.y0 .. rect.y1)
     }
 }
 
@@ -620,6 +586,16 @@ mod tests {
     }
 
     test! {
+        test_place_into_trapez_top
+            path: TRAPEZ,
+            min: Point::ZERO,
+            size: Size::new(20.0, 12.0),
+            point: Point::new(40.0, 20.0),
+            accuracy: 1e-2,
+            tolerance: 1e-2,
+    }
+
+    test! {
         test_place_into_trapez_with_min_x
             path: TRAPEZ,
             min: Point::new(60.0, 30.0),
@@ -635,6 +611,16 @@ mod tests {
             min: Point::new(30.0, 56.0),
             size: Size::new(30.0, 10.0),
             point: Point::new(31.0, 56.0),
+            accuracy: 1e-2,
+            tolerance: 1e-2,
+    }
+
+    test! {
+        test_place_into_trapez_top_with_min_x
+            path: TRAPEZ,
+            min: Point::new(60.0, 30.0),
+            size: Size::new(20.0, 10.0),
+            point: Point::new(60.0, 30.0),
             accuracy: 1e-2,
             tolerance: 1e-2,
     }
@@ -784,9 +770,9 @@ mod tests {
             path: ICEBERG,
             min: Point::ZERO,
             size: Size::new(53.0, 24.0),
-            point: Point::new(43.0, 58.0),
+            point: Point::new(42.5, 59.0),
             accuracy: 1e-2,
-            tolerance: 1.0,
+            tolerance: 0.25,
     }
 
     test! {
