@@ -71,6 +71,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::geom::cmp::value_no_nans;
     use super::*;
 
     fn seg(d: &str) -> PathSeg {

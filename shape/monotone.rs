@@ -1,5 +1,6 @@
 use std::ops::Mul;
 use arrayvec::{Array, ArrayVec};
+use kurbo::MAX_EXTREMA;
 use super::*;
 
 /// A wrapper for curves that are monotone in both dimensions.
@@ -57,7 +58,7 @@ impl<C: ParamCurve> Monotone<C> {
     }
 }
 
-impl<C: ParamCurveSolve + ParamCurveExtrema> Monotone<C> {
+impl<C: ParamCurveSolve> Monotone<C> {
     /// Find the `t` value corresponding to an `x` value, clamped to `0..1`.
     pub fn solve_one_t_for_x(&self, x: f64) -> f64 {
         let (start, end) = self.points();

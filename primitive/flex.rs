@@ -1,7 +1,7 @@
 use std::fmt;
 use std::ops::*;
 
-/// A flexible (_base_ / _shrink_ / _stretch_) length.
+/// A flexible (_base_ / _shrink_ / _stretch_) value.
 ///
 /// It has a base value, but can be shrunk down to `base - shrink` and stretched
 /// up to `base + stretch`.

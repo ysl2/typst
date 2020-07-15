@@ -1,5 +1,5 @@
 use std::ops::Mul;
-use super::ApproxEq;
+use crate::geom::approx::ApproxEq;
 
 /// A value that is either absolute or relative.
 ///

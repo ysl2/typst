@@ -1,4 +1,5 @@
 use arrayvec::{Array, ArrayVec};
+use crate::geom::roots;
 use super::*;
 
 /// The maximum number of solved `t` values for a coordinate value that can be

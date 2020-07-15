@@ -1,5 +1,6 @@
 use arrayvec::ArrayVec;
 use smallvec::SmallVec;
+use crate::geom::cmp::{value_no_nans, value_approx, position};
 use super::*;
 
 /// A data structure for fast, collisionless placement of objects into a group
@@ -514,6 +515,22 @@ impl ShapeGroup {
     /// Returns all regions contained in row `i`.
     fn regions(&self, i: usize) -> &[Region] {
         &self.regions[self.rows[i].idxs.clone()]
+    }
+}
+
+impl ShapeGroup {
+    /// Returns a path that can be used to render this group.
+    pub fn renderable_path(&self) -> BezPath {
+        let mut path = BezPath::new();
+        for r in &self.regions {
+            let top = PathSeg::Line(Line::new(r.left.start(), r.right.start()));
+            let bot = PathSeg::Line(Line::new(r.right.end(), r.left.end()));
+
+            path.extend(BezPath::from_path_segments(
+                [top, r.right.0, bot, r.left.0.reverse()].iter().copied()
+            ));
+        }
+        path
     }
 }
 
