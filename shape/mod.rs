@@ -1,6 +1,6 @@
 //! Shapes and curves.
 
-use super::approx::ApproxEq;
+use super::cmp::ApproxEq;
 use super::primitive::*;
 
 mod intersect;
