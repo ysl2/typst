@@ -2,12 +2,12 @@ use std::cmp::Ordering;
 use std::fmt;
 use super::Range;
 
-/// Dimensions (_width_ / _height_ / _depth_) of an object with baseline.
+/// 2D dimensions (_width_ / _height_ / _depth_) of an object with baseline.
 #[derive(Default, Copy, Clone, PartialEq)]
 pub struct Dim {
     /// The width of the object.
     pub width: f64,
-    /// The height of the object (extent above the basleline).
+    /// The height of the object (extent above the baseline).
     pub height: f64,
     /// The depth of the object (extent below the baseline).
     pub depth: f64,
