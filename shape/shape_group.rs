@@ -230,7 +230,7 @@ impl ShapeGroup {
 }
 
 impl ShapeGroup {
-    /// Place an object into the shape group.
+    /// Try to place an object into the shape group.
     ///
     /// This will find the top- and leftmost position in the shape group to
     /// place an object with the given size. The object will not collide with

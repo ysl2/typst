@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::fmt;
-use super::Range;
+use super::{Range, Size};
 
 /// 2D dimensions (_width_ / _height_ / _depth_) of an object with baseline.
 #[derive(Default, Copy, Clone, PartialEq)]
@@ -30,6 +30,12 @@ impl Dim {
     /// Get the height and depth as a v-dim.
     pub fn vdim(self) -> VDim {
         VDim { height: self.height, depth: self.depth }
+    }
+
+    /// Convert this dimensions to a size with `width` and summed `height` and
+    /// `depth`.
+    pub fn to_size(self) -> Size {
+        Size::new(self.width, self.height + self.depth)
     }
 }
 
