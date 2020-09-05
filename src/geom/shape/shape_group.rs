@@ -183,7 +183,7 @@ impl ShapeGroup {
         for mut row in border_rows {
             let start = self.regions.len();
 
-            let any = try_opt_or!(row.first(), continue);
+            let any = try_or!(row.first(), continue);
             let top = any.0.start().y;
             let bot = any.0.end().y;
 

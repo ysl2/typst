@@ -20,7 +20,7 @@
 //! sentence in the second box.
 
 use super::*;
-use crate::geom::Value4;
+use crate::geom_old::Value4;
 
 /// Performs the stack layouting.
 pub struct StackLayouter {

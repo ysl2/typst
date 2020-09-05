@@ -2,7 +2,7 @@
 
 use fontdock::{fallback, FallbackTree, FontStyle, FontVariant, FontWeight, FontWidth};
 
-use crate::geom::{Margins, Size, Value4};
+use crate::geom_old::{Margins, Size, Value4};
 use crate::length::{Length, ScaleLength};
 use crate::paper::{Paper, PaperClass, PAPER_A4};
 

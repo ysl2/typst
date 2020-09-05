@@ -55,7 +55,7 @@ impl fmt::Debug for Dim {
 ///
 /// Note that VDims can be compared:
 /// ```
-/// # use layr::geom::VDim;
+/// # use typstc::geom::VDim;
 /// let line = VDim::new(20.0, 4.0);
 /// let word = VDim::new(16.0, 4.0);
 ///

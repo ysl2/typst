@@ -10,7 +10,7 @@ use ttf_parser::GlyphId;
 use super::elements::{LayoutElement, Shaped};
 use super::*;
 use crate::font::SharedFontLoader;
-use crate::geom::Size;
+use crate::geom_old::Size;
 use crate::style::TextStyle;
 
 /// Layouts text into a box.

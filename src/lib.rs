@@ -30,6 +30,7 @@ pub mod compute;
 pub mod export;
 pub mod font;
 pub mod geom;
+pub mod geom_old;
 pub mod layout;
 pub mod length;
 pub mod library;

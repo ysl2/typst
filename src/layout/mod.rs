@@ -23,7 +23,7 @@ pub use tree::layout_tree as layout;
 
 use crate::compute::scope::Scope;
 use crate::font::SharedFontLoader;
-use crate::geom::{Margins, Size};
+use crate::geom_old::{Margins, Size};
 use crate::style::{LayoutStyle, PageStyle, TextStyle};
 use crate::syntax::tree::SyntaxTree;
 

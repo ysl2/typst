@@ -5,7 +5,7 @@ use std::fmt::{self, Debug, Formatter};
 use fontdock::FaceId;
 use ttf_parser::GlyphId;
 
-use crate::geom::Size;
+use crate::geom_old::Size;
 
 /// A collection of absolutely positioned layout elements.
 #[derive(Debug, Default, Clone, PartialEq)]

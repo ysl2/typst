@@ -14,7 +14,7 @@ use ttf_parser::OutlineBuilder;
 
 use typstc::export::pdf;
 use typstc::font::{DynProvider, SharedFontLoader};
-use typstc::geom::{Size, Value4};
+use typstc::geom_old::{Size, Value4};
 use typstc::layout::elements::{LayoutElement, Shaped};
 use typstc::layout::MultiLayout;
 use typstc::length::Length;

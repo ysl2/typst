@@ -1,6 +1,6 @@
 //! Predefined papers.
 
-use crate::geom::{Size, Value4};
+use crate::geom_old::{Size, Value4};
 use crate::length::{Length, ScaleLength};
 
 /// Specification of a paper.
