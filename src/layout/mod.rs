@@ -1,16 +1,13 @@
 //! Layouting of syntax trees into box layouts.
 
 pub mod elements;
-pub mod line;
 pub mod primitive;
-pub mod stack;
-pub mod text;
-mod tree;
+pub mod shaping;
 
 /// Basic types used across the layouting engine.
 pub mod prelude {
     pub use super::primitive::*;
-    pub use super::{layout, BoxLayout, LayoutContext, LayoutSpace, MultiLayout};
+    pub use super::Layout;
     pub use Dir::*;
     pub use GenAlign::*;
     pub use GenAxis::*;
@@ -19,134 +16,75 @@ pub mod prelude {
 }
 
 pub use primitive::*;
-pub use tree::layout_tree as layout;
 
-use crate::compute::scope::Scope;
+use crate::compute::Scope;
 use crate::font::SharedFontLoader;
-use crate::geom_old::{Margins, Size};
-use crate::style::{LayoutStyle, PageStyle, TextStyle};
+use crate::geom::{Dim, Point, Size};
+use crate::style::LayoutStyle;
 use crate::syntax::tree::SyntaxTree;
+use crate::{Feedback, Pass};
 
-use elements::LayoutElements;
-use prelude::*;
+use elements::LayoutElement;
 
-/// A collection of layouts.
-pub type MultiLayout = Vec<BoxLayout>;
-
-/// A finished box with content at fixed positions.
-#[derive(Debug, Clone, PartialEq)]
-pub struct BoxLayout {
-    /// The size of the box.
-    pub size: Size,
-    /// How to align this box in a parent container.
-    pub align: LayoutAlign,
-    /// The elements composing this layout.
-    pub elements: LayoutElements,
-}
-
-/// The context for layouting.
+/// A layout consisting of atomic elements.
 #[derive(Debug, Clone)]
-pub struct LayoutContext<'a> {
-    /// The font loader to query fonts from when typesetting text.
-    pub loader: &'a SharedFontLoader,
-    /// The function scope.
-    pub scope: &'a Scope,
-    /// The style for pages and text.
-    pub style: &'a LayoutStyle,
-    /// The unpadded size of this container (the base 100% for relative sizes).
-    pub base: Size,
-    /// The spaces to layout into.
-    pub spaces: LayoutSpaces,
-    /// Whether to spill over into copies of the last space or finish layouting
-    /// when the last space is used up.
-    pub repeat: bool,
-    /// The axes along which content is laid out.
-    pub axes: LayoutAxes,
-    /// The alignment of the _resulting_ layout. This does not effect the line
-    /// layouting itself, but rather how the finished layout will be positioned
-    /// in a parent layout.
-    pub align: LayoutAlign,
-    /// Whether this layouting process is the root page-building process.
-    pub root: bool,
+pub struct Layout {
+    /// The dimensions of the layout.
+    ///
+    /// A layout has a width, height and depth. The total height of the layout is
+    /// `height + depth` and the distribution of total height to height and depth
+    /// determines the baseline of the layout and thus how this layout is aligned with
+    /// other layouts in a line of text.
+    pub dim: Dim,
+    pub elements: Vec<(Point, LayoutElement)>,
 }
 
-/// A collection of layout spaces.
-pub type LayoutSpaces = Vec<LayoutSpace>;
-
-/// The space into which content is laid out.
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub struct LayoutSpace {
-    /// The maximum size of the rectangle to layout into.
-    pub size: Size,
-    /// Padding that should be respected on each side.
-    pub padding: Margins,
-    /// Whether to expand the size of the resulting layout to the full size of
-    /// this space or to shrink it to fit the content.
-    pub expansion: LayoutExpansion,
-}
-
-impl LayoutSpace {
-    /// The offset from the origin to the start of content, i.e.
-    /// `(padding.left, padding.top)`.
-    pub fn start(&self) -> Size {
-        Size::new(self.padding.left, self.padding.top)
+impl Layout {
+    pub fn new(dim: Dim) -> Self {
+        Self { dim, elements: vec![] }
     }
 
-    /// The actually usable area (size minus padding).
-    pub fn usable(&self) -> Size {
-        self.size.unpadded(self.padding)
+    pub fn size(&self) -> Size {
+        self.dim.to_size()
     }
 
-    /// The inner layout space with size reduced by the padding, zero padding of
-    /// its own and no layout expansion.
-    pub fn inner(&self) -> Self {
-        Self {
-            size: self.usable(),
-            padding: Margins::ZERO,
-            expansion: LayoutExpansion::new(false, false),
+    pub fn push(&mut self, pos: Point, element: LayoutElement) {
+        self.elements.push((pos, element));
+    }
+
+    pub fn push_group(&mut self, pos: Point, group: Layout) {
+        for (delta, element) in group.elements {
+            self.push(pos + delta.to_vec2(), element);
         }
     }
 }
 
-/// A sequence of layouting commands.
-pub type Commands = Vec<Command>;
+/// Process a syntax tree into a collection of layouts.
+#[allow(unused_variables)]
+pub async fn layout(
+    tree: &SyntaxTree,
+    loader: SharedFontLoader,
+    state: State,
+) -> Pass<Vec<Layout>> {
+    todo!("layout")
+}
 
-/// Commands executable by the layouting engine.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Command {
-    /// Layout the given tree in the current context (i.e. not nested). The
-    /// content of the tree is not laid out into a separate box and then added,
-    /// but simply laid out flatly in the active layouting process.
-    ///
-    /// This has the effect that the content fits nicely into the active line
-    /// layouting, enabling functions to e.g. change the style of some piece of
-    /// text while keeping it part of the current paragraph.
-    LayoutSyntaxTree(SyntaxTree),
+/// The layouting environment.
+pub struct Env {
+    /// The accumulated feedback.
+    pub f: Feedback,
+    /// The font loader to retrieve fonts from.
+    pub loader: SharedFontLoader,
+    /// The current execution state. As long as the available fonts are the same,
+    /// layouting is pure with respect to the layouted thing and this state.
+    pub state: State,
+}
 
-    /// Add a finished layout.
-    Add(BoxLayout),
-    /// Add multiple layouts, one after another. This is equivalent to multiple
-    /// `Add` commands.
-    AddMultiple(MultiLayout),
-
-    /// Add spacing of the given kind along the primary or secondary axis. The
-    /// kind defines how the spacing interacts with surrounding spacing.
-    AddSpacing(f64, SpacingKind, GenAxis),
-
-    /// Start a new line.
-    BreakLine,
-    /// Start a new page, which will be part of the finished layout even if it
-    /// stays empty (since the page break is a _hard_ space break).
-    BreakPage,
-
-    /// Update the text style.
-    SetTextStyle(TextStyle),
-    /// Update the page style.
-    SetPageStyle(PageStyle),
-
-    /// Update the alignment for future boxes added to this layouting process.
-    SetAlignment(LayoutAlign),
-    /// Update the layouting axes along which future boxes will be laid
-    /// out. This ends the current line.
-    SetAxes(LayoutAxes),
+/// The execution state.
+#[derive(Debug, Default, Clone)]
+pub struct State {
+    /// The scope which contains function definitions.
+    pub scope: Scope,
+    /// The current style configuration.
+    pub style: LayoutStyle,
 }

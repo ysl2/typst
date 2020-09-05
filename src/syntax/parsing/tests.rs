@@ -96,7 +96,7 @@ macro_rules! Tree {
 macro_rules! Call {
     (@$name:expr $(; $($tts:tt)*)?) => {{
         let name = Into::<Spanned<&str>>::into($name);
-        CallExpr {
+        Call {
             name: name.map(|n| Ident(n.to_string())),
             args: Table![@$($($tts)*)?],
         }

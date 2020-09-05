@@ -7,20 +7,16 @@ use std::path::Path;
 use std::rc::Rc;
 
 use fontdock::fs::{FsIndex, FsProvider};
-use fontdock::FontLoader;
 use futures_executor::block_on;
 use raqote::{DrawTarget, PathBuilder, SolidSource, Source, Transform, Vector};
 use ttf_parser::OutlineBuilder;
 
 use typstc::export::pdf;
-use typstc::font::{DynProvider, SharedFontLoader};
-use typstc::geom_old::{Size, Value4};
+use typstc::font::{FontLoader, SharedFontLoader};
+use typstc::geom::{Point, Vec2};
 use typstc::layout::elements::{LayoutElement, Shaped};
-use typstc::layout::MultiLayout;
-use typstc::length::Length;
-use typstc::paper::PaperClass;
-use typstc::style::PageStyle;
-use typstc::Typesetter;
+use typstc::layout::Layout;
+use typstc::typeset;
 
 const TEST_DIR: &str = "tests";
 const OUT_DIR: &str = "tests/out";
@@ -60,34 +56,20 @@ fn main() {
     let mut index = FsIndex::new();
     index.search_dir(FONT_DIR);
 
-    let (descriptors, files) = index.clone().into_vecs();
+    let (descriptors, files) = index.into_vecs();
     let provider = FsProvider::new(files.clone());
-    let dynamic = Box::new(provider) as Box<DynProvider>;
-    let loader = FontLoader::new(dynamic, descriptors);
+    let loader = FontLoader::new(Box::new(provider), descriptors);
     let loader = Rc::new(RefCell::new(loader));
-    let mut typesetter = Typesetter::new(loader.clone());
-
-    typesetter.set_page_style(PageStyle {
-        class: PaperClass::Custom,
-        size: Size::with_all(Length::pt(250.0).as_raw()),
-        margins: Value4::with_all(None),
-    });
 
     for (name, path, src) in filtered {
-        test(&name, &src, &path, &mut typesetter, &loader)
+        test(&name, &src, &path, loader.clone())
     }
 }
 
-fn test(
-    name: &str,
-    src: &str,
-    path: &Path,
-    typesetter: &mut Typesetter,
-    loader: &SharedFontLoader,
-) {
+fn test(name: &str, src: &str, path: &Path, loader: SharedFontLoader) {
     println!("Testing {}.", name);
 
-    let typeset = block_on(typesetter.typeset(src));
+    let typeset = block_on(typeset(src, loader.clone(), Default::default()));
     let layouts = typeset.output;
     let mut feedback = typeset.feedback;
 
@@ -105,6 +87,8 @@ fn test(
             diagnostic.v.message,
         );
     }
+
+    let loader = loader.borrow();
 
     let png_path = format!("{}/{}.png", OUT_DIR, name);
     render(&layouts, &loader, 3.0).write_png(png_path).unwrap();
@@ -144,46 +128,50 @@ impl TestFilter {
     }
 }
 
-fn render(layouts: &MultiLayout, loader: &SharedFontLoader, scale: f64) -> DrawTarget {
+fn render(layouts: &[Layout], loader: &FontLoader, scale: f64) -> DrawTarget {
     let pad = scale * 10.0;
     let width = 2.0 * pad
         + layouts
             .iter()
-            .map(|l| scale * l.size.x)
+            .map(|layout| scale * layout.size().width)
             .max_by(|a, b| a.partial_cmp(&b).unwrap())
             .unwrap()
             .round();
 
-    let height =
-        pad + layouts.iter().map(|l| scale * l.size.y + pad).sum::<f64>().round();
+    let height = pad
+        + layouts
+            .iter()
+            .map(|layout| scale * layout.size().height + pad)
+            .sum::<f64>()
+            .round();
 
     let mut surface = DrawTarget::new(width as i32, height as i32);
     surface.clear(BLACK);
 
-    let mut offset = Size::new(pad, pad);
+    let mut offset = Vec2::new(pad, pad);
     for layout in layouts {
         surface.fill_rect(
             offset.x as f32,
             offset.y as f32,
-            (scale * layout.size.x) as f32,
-            (scale * layout.size.y) as f32,
+            (scale * layout.size().width) as f32,
+            (scale * layout.size().height) as f32,
             &Source::Solid(WHITE),
             &Default::default(),
         );
 
-        for &(pos, ref element) in &layout.elements.0 {
+        for &(pos, ref element) in &layout.elements {
             match element {
                 LayoutElement::Text(shaped) => render_shaped(
                     &mut surface,
                     loader,
                     shaped,
-                    scale * pos + offset,
+                    (scale * pos.to_vec2() + offset).to_point(),
                     scale,
                 ),
             }
         }
 
-        offset.y += scale * layout.size.y + pad;
+        offset.y += scale * layout.size().height + pad;
     }
 
     surface
@@ -191,12 +179,11 @@ fn render(layouts: &MultiLayout, loader: &SharedFontLoader, scale: f64) -> DrawT
 
 fn render_shaped(
     surface: &mut DrawTarget,
-    loader: &SharedFontLoader,
+    loader: &FontLoader,
     shaped: &Shaped,
-    pos: Size,
+    pos: Point,
     scale: f64,
 ) {
-    let loader = loader.borrow();
     let face = loader.get_loaded(shaped.face);
 
     for (&glyph, &offset) in shaped.glyphs.iter().zip(&shaped.offsets) {

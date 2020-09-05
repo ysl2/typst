@@ -1,6 +1,6 @@
 //! Predefined papers.
 
-use crate::geom_old::{Size, Value4};
+use crate::geom::Size;
 use crate::length::{Length, ScaleLength};
 
 /// Specification of a paper.
@@ -38,14 +38,14 @@ pub enum PaperClass {
 
 impl PaperClass {
     /// The default margins for this page class.
-    pub fn default_margins(self) -> Value4<ScaleLength> {
+    pub fn default_margins(self) -> [ScaleLength; 4] {
         let values = |l, t, r, b| {
-            Value4::new(
+            [
                 ScaleLength::Scaled(l),
                 ScaleLength::Scaled(t),
                 ScaleLength::Scaled(r),
                 ScaleLength::Scaled(b),
-            )
+            ]
         };
 
         match self {

@@ -5,12 +5,11 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use fontdock::fs::{FsIndex, FsProvider};
-use fontdock::FontLoader;
 use futures_executor::block_on;
 
 use typstc::export::pdf;
-use typstc::font::DynProvider;
-use typstc::Typesetter;
+use typstc::font::FontLoader;
+use typstc::typeset;
 
 fn main() {
     let args: Vec<_> = std::env::args().collect();
@@ -38,12 +37,10 @@ fn main() {
 
     let (descriptors, files) = index.into_vecs();
     let provider = FsProvider::new(files.clone());
-    let dynamic = Box::new(provider) as Box<DynProvider>;
-    let loader = FontLoader::new(dynamic, descriptors);
+    let loader = FontLoader::new(Box::new(provider), descriptors);
     let loader = Rc::new(RefCell::new(loader));
 
-    let typesetter = Typesetter::new(loader.clone());
-    let pass = block_on(typesetter.typeset(&src));
+    let pass = block_on(typeset(&src, loader.clone(), Default::default()));
     let layouts = pass.output;
 
     let mut feedback = pass.feedback;
@@ -62,8 +59,8 @@ fn main() {
         );
     }
 
+    let loader = loader.borrow();
     let file = File::create(&dest_path).expect("failed to create output file");
-
     let writer = BufWriter::new(file);
     pdf::export(&layouts, &loader, writer).expect("failed to export pdf");
 }

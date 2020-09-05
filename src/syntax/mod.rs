@@ -1,10 +1,13 @@
 //! Syntax trees, parsing and tokenization.
 
 pub mod decoration;
-pub mod parsing;
 pub mod span;
 pub mod tokens;
 pub mod tree;
+
+mod parsing;
+
+pub use parsing::parse;
 
 #[cfg(test)]
 mod tests {

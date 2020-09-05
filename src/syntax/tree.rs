@@ -4,13 +4,13 @@ use std::fmt::{self, Debug, Formatter};
 
 use super::decoration::Decoration;
 use super::span::{SpanVec, Spanned};
-use super::tokens::is_identifier;
+use super::tokens::is_ident;
 use crate::color::RgbaColor;
 use crate::compute::table::{SpannedEntry, Table};
-use crate::compute::value::{TableValue, Value};
-use crate::layout::LayoutContext;
+use crate::compute::{TableValue, Value};
+use crate::layout::Env;
 use crate::length::Length;
-use crate::{DynFuture, Feedback};
+use crate::DynFuture;
 
 /// A collection of nodes which form a tree together with the nodes' children.
 pub type SyntaxTree = SpanVec<SyntaxNode>;
@@ -38,7 +38,7 @@ pub enum SyntaxNode {
     /// An optionally highlighted (multi-line) code block.
     Code(Code),
     /// A function call.
-    Call(CallExpr),
+    Call(Call),
 }
 
 /// A section heading.
@@ -76,8 +76,8 @@ pub enum Expr {
     Table(TableExpr),
     /// A syntax tree containing typesetting content.
     Tree(SyntaxTree),
-    /// A function call expression: `cmyk(37.7, 0, 3.9, 1.1)`.
-    Call(CallExpr),
+    /// A function call: `cmyk(37.7, 0, 3.9, 1.1)`.
+    Call(Call),
     /// An operation that negates the contained expression.
     Neg(Box<Spanned<Expr>>),
     /// An operation that adds the contained expressions.
@@ -114,7 +114,7 @@ impl Expr {
     }
 
     /// Evaluate the expression to a value.
-    pub async fn eval(&self, ctx: &LayoutContext<'_>, f: &mut Feedback) -> Value {
+    pub async fn eval(&self, env: &mut Env) -> Value {
         use Expr::*;
         match self {
             Ident(i) => Value::Ident(i.clone()),
@@ -123,9 +123,9 @@ impl Expr {
             &Number(n) => Value::Number(n),
             &Length(s) => Value::Length(s),
             &Color(c) => Value::Color(c),
-            Table(t) => Value::Table(t.eval(ctx, f).await),
+            Table(t) => Value::Table(t.eval(env).await),
             Tree(t) => Value::Tree(t.clone()),
-            Call(call) => call.eval(ctx, f).await,
+            Call(call) => call.eval(env).await,
             Neg(_) => todo!("eval neg"),
             Add(_, _) => todo!("eval add"),
             Sub(_, _) => todo!("eval sub"),
@@ -164,7 +164,7 @@ pub struct Ident(pub String);
 impl Ident {
     /// Create a new identifier from a string checking that it is a valid.
     pub fn new(ident: impl AsRef<str> + Into<String>) -> Option<Self> {
-        if is_identifier(ident.as_ref()) {
+        if is_ident(ident.as_ref()) {
             Some(Self(ident.into()))
         } else {
             None
@@ -193,16 +193,12 @@ pub type TableExpr = Table<SpannedEntry<Expr>>;
 
 impl TableExpr {
     /// Evaluate the table expression to a table value.
-    pub fn eval<'a>(
-        &'a self,
-        ctx: &'a LayoutContext<'a>,
-        f: &'a mut Feedback,
-    ) -> DynFuture<'a, TableValue> {
+    pub fn eval<'a>(&'a self, env: &'a mut Env) -> DynFuture<'a, TableValue> {
         Box::pin(async move {
             let mut table = TableValue::new();
 
             for (key, entry) in self.iter() {
-                let val = entry.val.v.eval(ctx, f).await;
+                let val = entry.val.v.eval(env).await;
                 let spanned = Spanned::new(val, entry.val.span);
                 let entry = SpannedEntry::new(entry.key, spanned);
                 table.insert(key, entry);
@@ -215,27 +211,24 @@ impl TableExpr {
 
 /// An invocation of a function.
 #[derive(Debug, Clone, PartialEq)]
-pub struct CallExpr {
+pub struct Call {
     pub name: Spanned<Ident>,
     pub args: TableExpr,
 }
 
-impl CallExpr {
+impl Call {
     /// Evaluate the call expression to a value.
-    pub async fn eval(&self, ctx: &LayoutContext<'_>, f: &mut Feedback) -> Value {
+    pub async fn eval(&self, env: &mut Env) -> Value {
         let name = self.name.v.as_str();
         let span = self.name.span;
-        let args = self.args.eval(ctx, f).await;
+        let args = self.args.eval(env).await;
 
-        if let Some(func) = ctx.scope.func(name) {
-            let pass = func(span, args, ctx.clone()).await;
-            f.extend(pass.feedback);
-            f.decorations.push(Spanned::new(Decoration::Resolved, span));
-            pass.output
+        if let Some(func) = env.state.scope.func(name) {
+            (*func.clone())(span, args, env).await
         } else {
             if !name.is_empty() {
-                error!(@f, span, "unknown function");
-                f.decorations.push(Spanned::new(Decoration::Unresolved, span));
+                error!(@env.f, span, "unknown function");
+                env.f.decorations.push(Spanned::new(Decoration::Unresolved, span));
             }
             Value::Table(args)
         }

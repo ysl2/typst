@@ -9,7 +9,7 @@ use crate::syntax::tokens::{Token, TokenMode, Tokens};
 use crate::syntax::tree::*;
 use crate::{Feedback, Pass};
 
-/// Parse a string of source code.
+/// Parse a string of source code into a syntax tree.
 pub fn parse(src: &str) -> Pass<SyntaxTree> {
     Parser::new(src).parse()
 }
@@ -193,7 +193,7 @@ impl Parser<'_> {
 
 // Function calls.
 impl Parser<'_> {
-    fn parse_bracket_call(&mut self, chained: bool) -> Spanned<CallExpr> {
+    fn parse_bracket_call(&mut self, chained: bool) -> Spanned<Call> {
         let before_bracket = self.pos();
         if !chained {
             self.start_group(Group::Bracket);
@@ -250,15 +250,15 @@ impl Parser<'_> {
             span.expand(body_span);
         }
 
-        Spanned::new(CallExpr { name, args }, span)
+        Spanned::new(Call { name, args }, span)
     }
 
-    fn parse_paren_call(&mut self, name: Spanned<Ident>) -> Spanned<CallExpr> {
+    fn parse_paren_call(&mut self, name: Spanned<Ident>) -> Spanned<Call> {
         self.start_group(Group::Paren);
         let args = self.parse_table_contents().0;
         let args_span = self.end_group();
         let span = Span::merge(name.span, args_span);
-        Spanned::new(CallExpr { name, args }, span)
+        Spanned::new(Call { name, args }, span)
     }
 }
 

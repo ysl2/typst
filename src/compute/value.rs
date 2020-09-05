@@ -4,20 +4,20 @@ use std::fmt::{self, Debug, Formatter};
 use std::ops::Deref;
 use std::rc::Rc;
 
-use fontdock::{FontStyle, FontWeight, FontWidth};
-
+use super::convert::TryFromValue;
 use super::table::{SpannedEntry, Table};
 use crate::color::RgbaColor;
-use crate::layout::{Command, Commands, Dir, LayoutContext, SpecAlign};
-use crate::length::{Length, ScaleLength};
-use crate::paper::Paper;
+use crate::layout::Env;
+use crate::length::Length;
 use crate::syntax::span::{Span, Spanned};
 use crate::syntax::tree::{Ident, SyntaxNode, SyntaxTree};
-use crate::{DynFuture, Feedback, Pass};
+use crate::{DynFuture, Feedback};
 
 /// A computational value.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum Value {
+    /// The none value.
+    None,
     /// An identifier: `ident`.
     Ident(Ident),
     /// A string: `"string"`.
@@ -36,8 +36,6 @@ pub enum Value {
     Tree(SyntaxTree),
     /// An executable function.
     Func(FuncValue),
-    /// Layouting commands.
-    Commands(Commands),
 }
 
 impl Value {
@@ -46,6 +44,7 @@ impl Value {
     pub fn name(&self) -> &'static str {
         use Value::*;
         match self {
+            None => "none",
             Ident(_) => "identifier",
             Str(_) => "string",
             Bool(_) => "bool",
@@ -55,45 +54,42 @@ impl Value {
             Table(_) => "table",
             Tree(_) => "syntax tree",
             Func(_) => "function",
-            Commands(_) => "commands",
         }
     }
 }
 
 impl Spanned<Value> {
-    /// Transform this value into something layoutable.
+    /// Transform this value into a syntax tree.
     ///
-    /// If this is already a command-value, it is simply unwrapped, otherwise
-    /// the value is represented as layoutable content in a reasonable way.
-    pub fn into_commands(self) -> Commands {
+    /// If this is already a tree, it is simply unwrapped, otherwise it's transformed into
+    /// a tree that represents it reasonably.
+    pub fn repr_tree(self) -> SyntaxTree {
         match self.v {
-            Value::Commands(commands) => commands,
-            Value::Tree(tree) => vec![Command::LayoutSyntaxTree(tree)],
+            Value::Tree(tree) => tree,
 
             // Forward to each entry, separated with spaces.
             Value::Table(table) => {
-                let mut commands = vec![];
+                let mut tree = SyntaxTree::new();
+
                 let mut end = None;
                 for entry in table.into_values() {
                     if let Some(last_end) = end {
                         let span = Span::new(last_end, entry.key.start);
-                        commands.push(Command::LayoutSyntaxTree(vec![Spanned::new(
-                            SyntaxNode::Spacing,
-                            span,
-                        )]));
+                        tree.push(Spanned::new(SyntaxNode::Spacing, span));
                     }
 
                     end = Some(entry.val.span.end);
-                    commands.extend(entry.val.into_commands());
+                    tree.extend(entry.val.repr_tree());
                 }
-                commands
+
+                tree
             }
 
-            // Format with debug.
-            val => vec![Command::LayoutSyntaxTree(vec![Spanned::new(
+            // Fallback: Format with Debug.
+            val => vec![Spanned::new(
                 SyntaxNode::Text(format!("{:?}", val)),
                 self.span,
-            )])],
+            )],
         }
     }
 }
@@ -102,6 +98,7 @@ impl Debug for Value {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         use Value::*;
         match self {
+            None => f.pad("none"),
             Ident(i) => i.fmt(f),
             Str(s) => s.fmt(f),
             Bool(b) => b.fmt(f),
@@ -110,27 +107,7 @@ impl Debug for Value {
             Color(c) => c.fmt(f),
             Table(t) => t.fmt(f),
             Tree(t) => t.fmt(f),
-            Func(_) => f.pad("<function>"),
-            Commands(c) => c.fmt(f),
-        }
-    }
-}
-
-impl PartialEq for Value {
-    fn eq(&self, other: &Self) -> bool {
-        use Value::*;
-        match (self, other) {
-            (Ident(a), Ident(b)) => a == b,
-            (Str(a), Str(b)) => a == b,
-            (Bool(a), Bool(b)) => a == b,
-            (Number(a), Number(b)) => a == b,
-            (Length(a), Length(b)) => a == b,
-            (Color(a), Color(b)) => a == b,
-            (Table(a), Table(b)) => a == b,
-            (Tree(a), Tree(b)) => a == b,
-            (Func(a), Func(b)) => Rc::ptr_eq(a, b),
-            (Commands(a), Commands(b)) => a == b,
-            _ => false,
+            Func(c) => c.fmt(f),
         }
     }
 }
@@ -145,8 +122,32 @@ impl PartialEq for Value {
 /// layouting engine to do what the function pleases.
 ///
 /// The dynamic function object is wrapped in an `Rc` to keep `Value` clonable.
-pub type FuncValue =
-    Rc<dyn Fn(Span, TableValue, LayoutContext<'_>) -> DynFuture<Pass<Value>>>;
+#[derive(Clone)]
+pub struct FuncValue(pub Rc<FuncType>);
+
+type FuncType = dyn Fn(Span, TableValue, &mut Env) -> DynFuture<Value>;
+
+impl Deref for FuncValue {
+    type Target = FuncType;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_ref()
+    }
+}
+
+impl Eq for FuncValue {}
+
+impl PartialEq for FuncValue {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Debug for FuncValue {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        f.pad("<function>")
+    }
+}
 
 /// A table of values.
 ///
@@ -269,198 +270,6 @@ impl TableValue {
         for entry in self.values() {
             let span = Span::merge(entry.key, entry.val.span);
             error!(@f, span, "unexpected argument");
-        }
-    }
-}
-
-/// A trait for converting values into more specific types.
-pub trait TryFromValue: Sized {
-    // This trait takes references because we don't want to move the value
-    // out of its origin in case this returns `None`. This solution is not
-    // perfect because we need to do some cloning in the impls for this trait,
-    // but we haven't got a better solution, for now.
-
-    /// Try to convert a value to this type.
-    ///
-    /// Returns `None` and generates an appropriate error if the value is not
-    /// valid for this type.
-    fn try_from_value(value: Spanned<&Value>, f: &mut Feedback) -> Option<Self>;
-}
-
-macro_rules! impl_match {
-    ($type:ty, $name:expr, $($p:pat => $r:expr),* $(,)?) => {
-        impl TryFromValue for $type {
-            fn try_from_value(value: Spanned<&Value>, f: &mut Feedback) -> Option<Self> {
-                #[allow(unreachable_patterns)]
-                match value.v {
-                    $($p => Some($r)),*,
-                    other => {
-                        error!(
-                            @f, value.span,
-                            "expected {}, found {}", $name, other.name()
-                        );
-                        None
-                    }
-                }
-            }
-        }
-    };
-}
-
-macro_rules! impl_ident {
-    ($type:ty, $name:expr, $parse:expr) => {
-        impl TryFromValue for $type {
-            fn try_from_value(value: Spanned<&Value>, f: &mut Feedback) -> Option<Self> {
-                if let Value::Ident(ident) = value.v {
-                    let val = $parse(ident.as_str());
-                    if val.is_none() {
-                        error!(@f, value.span, "invalid {}", $name);
-                    }
-                    val
-                } else {
-                    error!(
-                        @f, value.span,
-                        "expected {}, found {}", $name, value.v.name()
-                    );
-                    None
-                }
-            }
-        }
-    };
-}
-
-impl<T: TryFromValue> TryFromValue for Spanned<T> {
-    fn try_from_value(value: Spanned<&Value>, f: &mut Feedback) -> Option<Self> {
-        let span = value.span;
-        T::try_from_value(value, f).map(|v| Spanned { v, span })
-    }
-}
-
-impl_match!(Value, "value", v => v.clone());
-impl_match!(Ident, "identifier", Value::Ident(i) => i.clone());
-impl_match!(String, "string", Value::Str(s) => s.clone());
-impl_match!(bool, "bool", &Value::Bool(b) => b);
-impl_match!(f64, "number", &Value::Number(n) => n);
-impl_match!(Length, "length", &Value::Length(l) => l);
-impl_match!(SyntaxTree, "tree", Value::Tree(t) => t.clone());
-impl_match!(TableValue, "table", Value::Table(t) => t.clone());
-impl_match!(FuncValue, "function", Value::Func(f) => f.clone());
-impl_match!(ScaleLength, "number or length",
-    &Value::Length(length) => ScaleLength::Absolute(length),
-    &Value::Number(scale) => ScaleLength::Scaled(scale),
-);
-
-/// A value type that matches identifiers and strings and implements
-/// `Into<String>`.
-pub struct StringLike(pub String);
-
-impl Deref for StringLike {
-    type Target = str;
-
-    fn deref(&self) -> &str {
-        self.0.as_str()
-    }
-}
-
-impl From<StringLike> for String {
-    fn from(like: StringLike) -> String {
-        like.0
-    }
-}
-
-impl_match!(StringLike, "identifier or string",
-    Value::Ident(Ident(s)) => StringLike(s.clone()),
-    Value::Str(s) => StringLike(s.clone()),
-);
-
-impl_ident!(Dir, "direction", |s| match s {
-    "ltr" => Some(Self::LTR),
-    "rtl" => Some(Self::RTL),
-    "ttb" => Some(Self::TTB),
-    "btt" => Some(Self::BTT),
-    _ => None,
-});
-
-impl_ident!(SpecAlign, "alignment", |s| match s {
-    "left" => Some(Self::Left),
-    "right" => Some(Self::Right),
-    "top" => Some(Self::Top),
-    "bottom" => Some(Self::Bottom),
-    "center" => Some(Self::Center),
-    _ => None,
-});
-
-impl_ident!(FontStyle, "font style", FontStyle::from_name);
-impl_ident!(Paper, "paper", Paper::from_name);
-
-impl TryFromValue for FontWeight {
-    fn try_from_value(value: Spanned<&Value>, f: &mut Feedback) -> Option<Self> {
-        match value.v {
-            &Value::Number(weight) => {
-                const MIN: u16 = 100;
-                const MAX: u16 = 900;
-
-                Some(Self(if weight < MIN as f64 {
-                    error!(@f, value.span, "the minimum font weight is {}", MIN);
-                    MIN
-                } else if weight > MAX as f64 {
-                    error!(@f, value.span, "the maximum font weight is {}", MAX);
-                    MAX
-                } else {
-                    weight.round() as u16
-                }))
-            }
-            Value::Ident(ident) => {
-                let weight = Self::from_name(ident.as_str());
-                if weight.is_none() {
-                    error!(@f, value.span, "invalid font weight");
-                }
-                weight
-            }
-            other => {
-                error!(
-                    @f, value.span,
-                    "expected font weight (name or number), found {}",
-                    other.name(),
-                );
-                None
-            }
-        }
-    }
-}
-
-impl TryFromValue for FontWidth {
-    fn try_from_value(value: Spanned<&Value>, f: &mut Feedback) -> Option<Self> {
-        match value.v {
-            &Value::Number(width) => {
-                const MIN: u16 = 1;
-                const MAX: u16 = 9;
-
-                Self::new(if width < MIN as f64 {
-                    error!(@f, value.span, "the minimum font width is {}", MIN);
-                    MIN
-                } else if width > MAX as f64 {
-                    error!(@f, value.span, "the maximum font width is {}", MAX);
-                    MAX
-                } else {
-                    width.round() as u16
-                })
-            }
-            Value::Ident(ident) => {
-                let width = Self::from_name(ident.as_str());
-                if width.is_none() {
-                    error!(@f, value.span, "invalid font width");
-                }
-                width
-            }
-            other => {
-                error!(
-                    @f, value.span,
-                    "expected font width (name or number), found {}",
-                    other.name(),
-                );
-                None
-            }
         }
     }
 }

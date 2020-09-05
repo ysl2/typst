@@ -3,11 +3,11 @@ use std::rc::Rc;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use fontdock::fs::{FsIndex, FsProvider};
-use fontdock::FontLoader;
+use futures_executor::block_on;
 
-use typstc::font::DynProvider;
-use typstc::syntax::parsing::parse;
-use typstc::Typesetter;
+use typstc::font::FontLoader;
+use typstc::syntax::parse;
+use typstc::typeset;
 
 const FONT_DIR: &str = "fonts";
 
@@ -27,18 +27,16 @@ fn typesetting_benchmark(c: &mut Criterion) {
 
     let (descriptors, files) = index.clone().into_vecs();
     let provider = FsProvider::new(files.clone());
-    let dynamic = Box::new(provider) as Box<DynProvider>;
-    let loader = FontLoader::new(dynamic, descriptors);
+    let loader = FontLoader::new(Box::new(provider), descriptors);
     let loader = Rc::new(RefCell::new(loader));
-    let typesetter = Typesetter::new(loader.clone());
 
     c.bench_function("typeset-coma-28-lines", |b| {
-        b.iter(|| futures_executor::block_on(typesetter.typeset(COMA)))
+        b.iter(|| block_on(typeset(COMA, loader.clone(), Default::default())))
     });
 
     let long = COMA.repeat(100);
     c.bench_function("typeset-coma-2800-lines", |b| {
-        b.iter(|| futures_executor::block_on(typesetter.typeset(&long)))
+        b.iter(|| block_on(typeset(&long, loader.clone(), Default::default())))
     });
 }
 

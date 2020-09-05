@@ -9,6 +9,7 @@ use crate::length::Length;
 
 use Token::*;
 use TokenMode::*;
+
 /// A minimal semantic entity of source code.
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Token<'s> {
@@ -497,7 +498,7 @@ impl<'s> Tokens<'s> {
             Number(num / 100.0)
         } else if let Ok(length) = text.parse::<Length>() {
             Length(length)
-        } else if is_identifier(text) {
+        } else if is_ident(text) {
             Ident(text)
         } else {
             Invalid(text)
@@ -578,21 +579,20 @@ pub fn is_newline_char(character: char) -> bool {
 }
 
 /// Whether this word is a valid identifier.
-pub fn is_identifier(string: &str) -> bool {
-    fn is_extra_allowed(c: char) -> bool {
+pub fn is_ident(string: &str) -> bool {
+    fn is_also_allowed(c: char) -> bool {
         c == '.' || c == '-' || c == '_'
     }
 
     let mut chars = string.chars();
     match chars.next() {
-        Some(c) if UnicodeXID::is_xid_start(c) || is_extra_allowed(c) => {}
+        Some(c) if c.is_xid_start() || is_also_allowed(c) => {}
         _ => return false,
     }
 
     for c in chars {
-        match c {
-            c if UnicodeXID::is_xid_continue(c) || is_extra_allowed(c) => {}
-            _ => return false,
+        if !c.is_xid_continue() && !is_also_allowed(c) {
+            return false;
         }
     }
 

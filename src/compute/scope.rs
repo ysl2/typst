@@ -6,13 +6,13 @@ use std::fmt::{self, Debug, Formatter};
 use super::value::FuncValue;
 
 /// A map from identifiers to functions.
+#[derive(Default, Clone)]
 pub struct Scope {
     functions: HashMap<String, FuncValue>,
 }
 
 impl Scope {
-    // Create a new empty scope with a fallback function that is invoked when no
-    // match is found.
+    /// Create a new empty scope.
     pub fn new() -> Self {
         Self { functions: HashMap::new() }
     }

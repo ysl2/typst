@@ -4,11 +4,14 @@ use std::cell::RefCell;
 use std::ops::Deref;
 use std::rc::Rc;
 
-use fontdock::{ContainsChar, FaceFromVec, FontLoader, FontProvider};
+use fontdock::{ContainsChar, FaceFromVec, FontProvider};
 use ttf_parser::Face;
 
 /// A referenced-count shared font loader backed by a dynamic provider.
-pub type SharedFontLoader = Rc<RefCell<FontLoader<Box<DynProvider>>>>;
+pub type SharedFontLoader = Rc<RefCell<FontLoader>>;
+
+/// A font loader backed by a dynamic provider.
+pub type FontLoader = fontdock::FontLoader<Box<DynProvider>>;
 
 /// The dynamic font provider type backing the font loader.
 pub type DynProvider = dyn FontProvider<Face = OwnedFace>;

@@ -13,10 +13,10 @@ use tide::font::{
 use tide::{PdfWriter, Rect, Ref, Trailer, Version};
 use ttf_parser::{name_id, GlyphId};
 
+use crate::font::FontLoader;
 use crate::layout::elements::LayoutElement;
-use crate::layout::BoxLayout;
+use crate::layout::Layout;
 use crate::length::Length;
-use crate::SharedFontLoader;
 
 /// Export a list of layouts into a _PDF_ document.
 ///
@@ -27,8 +27,8 @@ use crate::SharedFontLoader;
 /// The raw _PDF_ is written into the `target` writable, returning the number of
 /// bytes written.
 pub fn export<W: Write>(
-    layout: &[BoxLayout],
-    loader: &SharedFontLoader,
+    layout: &[Layout],
+    loader: &FontLoader,
     target: W,
 ) -> io::Result<usize> {
     PdfExporter::new(layout, loader, target)?.write()
@@ -36,8 +36,8 @@ pub fn export<W: Write>(
 
 struct PdfExporter<'a, W: Write> {
     writer: PdfWriter<W>,
-    layouts: &'a [BoxLayout],
-    loader: &'a SharedFontLoader,
+    layouts: &'a [Layout],
+    loader: &'a FontLoader,
     /// We need to know exactly which indirect reference id will be used for
     /// which objects up-front to correctly declare the document catalogue, page
     /// tree and so on. These offsets are computed in the beginning and stored
@@ -59,11 +59,7 @@ struct Offsets {
 const NUM_OBJECTS_PER_FONT: u32 = 5;
 
 impl<'a, W: Write> PdfExporter<'a, W> {
-    fn new(
-        layouts: &'a [BoxLayout],
-        loader: &'a SharedFontLoader,
-        target: W,
-    ) -> io::Result<Self> {
+    fn new(layouts: &'a [Layout], loader: &'a FontLoader, target: W) -> io::Result<Self> {
         let (to_pdf, to_fontdock) = remap_fonts(layouts);
         let offsets = calculate_offsets(layouts.len(), to_pdf.len());
 
@@ -111,8 +107,8 @@ impl<'a, W: Write> PdfExporter<'a, W> {
             let rect = Rect::new(
                 0.0,
                 0.0,
-                Length::raw(page.size.x).as_pt() as f32,
-                Length::raw(page.size.y).as_pt() as f32,
+                Length::raw(page.size().width).as_pt() as f32,
+                Length::raw(page.size().height).as_pt() as f32,
             );
 
             self.writer.write_obj(
@@ -131,7 +127,7 @@ impl<'a, W: Write> PdfExporter<'a, W> {
         Ok(())
     }
 
-    fn write_page(&mut self, id: u32, page: &BoxLayout) -> io::Result<()> {
+    fn write_page(&mut self, id: u32, page: &Layout) -> io::Result<()> {
         let mut text = Text::new();
 
         // Font switching actions are only written when the face used for
@@ -139,7 +135,7 @@ impl<'a, W: Write> PdfExporter<'a, W> {
         let mut face = FaceId::MAX;
         let mut size = 0.0;
 
-        for (pos, element) in &page.elements.0 {
+        for (pos, element) in &page.elements {
             match element {
                 LayoutElement::Text(shaped) => {
                     if shaped.face != face || shaped.size != size {
@@ -152,7 +148,7 @@ impl<'a, W: Write> PdfExporter<'a, W> {
                     }
 
                     let x = Length::raw(pos.x).as_pt();
-                    let y = Length::raw(page.size.y - pos.y - size).as_pt();
+                    let y = Length::raw(page.size().height - pos.y - size).as_pt();
                     text.tm(1.0, 0.0, 0.0, 1.0, x as f32, y as f32);
                     text.tj(shaped.encode_glyphs_be());
                 }
@@ -168,8 +164,7 @@ impl<'a, W: Write> PdfExporter<'a, W> {
         let mut id = self.offsets.fonts.0;
 
         for &face_id in &self.to_layout {
-            let loader = self.loader.borrow();
-            let face = loader.get_loaded(face_id);
+            let face = self.loader.get_loaded(face_id);
 
             let name = face
                 .names()
@@ -281,14 +276,14 @@ impl<'a, W: Write> PdfExporter<'a, W> {
 /// Assigns a new PDF-internal index to each used face and returns two mappings:
 /// - Forwards from the old face ids to the new pdf indices (hash map)
 /// - Backwards from the pdf indices to the old face ids (vec)
-fn remap_fonts(layouts: &[BoxLayout]) -> (HashMap<FaceId, usize>, Vec<FaceId>) {
+fn remap_fonts(layouts: &[Layout]) -> (HashMap<FaceId, usize>, Vec<FaceId>) {
     let mut to_pdf = HashMap::new();
     let mut to_layout = vec![];
 
     // We want to find out which font faces are used at all. To do that, look at
     // each text element to find out which face is uses.
     for layout in layouts {
-        for (_, element) in &layout.elements.0 {
+        for (_, element) in &layout.elements {
             let LayoutElement::Text(shaped) = element;
             to_pdf.entry(shaped.face).or_insert_with(|| {
                 let next_id = to_layout.len();
