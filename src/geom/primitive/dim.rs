@@ -1,6 +1,6 @@
+use super::{Range, Size};
 use std::cmp::Ordering;
 use std::fmt;
-use super::{Range, Size};
 
 /// 2D dimensions (_width_ / _height_ / _depth_) of an object with baseline.
 #[derive(Default, Copy, Clone, PartialEq)]
@@ -85,10 +85,7 @@ impl VDim {
 
     /// Create a new v-dim with the same value for `height` and `depth`.
     pub fn uniform(value: f64) -> VDim {
-        VDim {
-            height: value,
-            depth: value,
-        }
+        VDim { height: value, depth: value }
     }
 
     /// A v-dim with the minimum height and depth values of this and another

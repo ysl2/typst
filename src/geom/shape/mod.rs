@@ -9,8 +9,8 @@ mod shape_group;
 mod solve;
 
 pub use kurbo::{
-    BezPath, Circle, CubicBez, Ellipse, Line, QuadBez, Rect, RoundedRect,
-    PathEl, PathSeg, SvgParseError, ParamCurve, ParamCurveExtrema, Shape,
+    BezPath, Circle, CubicBez, Ellipse, Line, ParamCurve, ParamCurveExtrema, PathEl,
+    PathSeg, QuadBez, Rect, RoundedRect, Shape, SvgParseError,
 };
 
 pub use intersect::find_intersections_bbox;
@@ -26,8 +26,10 @@ pub trait RectExt {
 
 impl RectExt for Rect {
     fn overlaps(&self, other: &Self) -> bool {
-        self.x1 > other.x0 && other.x1 > self.x0
-        && self.y1 > other.y0 && other.y1 > self.y0
+        self.x1 > other.x0
+            && other.x1 > self.x0
+            && self.y1 > other.y0
+            && other.y1 > self.y0
     }
 }
 

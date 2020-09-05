@@ -1,6 +1,6 @@
-use arrayvec::{Array, ArrayVec};
-use crate::geom::roots;
 use super::*;
+use crate::geom::roots;
+use arrayvec::{Array, ArrayVec};
 
 /// The maximum number of solved `t` values for a coordinate value that can be
 /// reported in the `ParamCurveSolve` trait.
@@ -16,18 +16,12 @@ pub trait ParamCurveSolve: ParamCurve {
 
     /// Find the `y` values corresponding to an `x` value.
     fn solve_y_for_x(&self, x: f64) -> ArrayVec<[f64; MAX_SOLVE]> {
-        self.solve_t_for_x(x)
-            .into_iter()
-            .map(|t| self.eval(t).y)
-            .collect()
+        self.solve_t_for_x(x).into_iter().map(|t| self.eval(t).y).collect()
     }
 
     /// Find the `x` values corresponding to an `y` value.
     fn solve_x_for_y(&self, y: f64) -> ArrayVec<[f64; MAX_SOLVE]> {
-        self.solve_t_for_y(y)
-            .into_iter()
-            .map(|t| self.eval(t).x)
-            .collect()
+        self.solve_t_for_y(y).into_iter().map(|t| self.eval(t).x).collect()
     }
 }
 
@@ -104,12 +98,7 @@ fn solve_cubic_t_for_v(
 }
 
 /// Find all `t` values matching `v` for a quadratic curve.
-fn solve_quad_t_for_v(
-    p0: f64,
-    p1: f64,
-    p2: f64,
-    v: f64,
-) -> ArrayVec<[f64; MAX_SOLVE]> {
+fn solve_quad_t_for_v(p0: f64, p1: f64, p2: f64, v: f64) -> ArrayVec<[f64; MAX_SOLVE]> {
     let c2 = p0 - 2.0 * p1 + p2;
     let c1 = -2.0 * p0 + 2.0 * p1;
     let c0 = p0 - v;
@@ -117,18 +106,14 @@ fn solve_quad_t_for_v(
 }
 
 /// Find all `t` values matching `v` for a linear curve.
-fn solve_line_t_for_v(
-    p0: f64,
-    p1: f64,
-    v: f64,
-) -> ArrayVec<[f64; MAX_SOLVE]> {
+fn solve_line_t_for_v(p0: f64, p1: f64, v: f64) -> ArrayVec<[f64; MAX_SOLVE]> {
     let c1 = -p0 + p1;
     let c0 = p0 - v;
     filter_t(roots::solve_linear(c0, c1))
 }
 
 /// Filter out all t values that are not between 0 and 1.
-fn filter_t(vec: ArrayVec<impl Array<Item=f64>>) -> ArrayVec<[f64; MAX_SOLVE]> {
+fn filter_t(vec: ArrayVec<impl Array<Item = f64>>) -> ArrayVec<[f64; MAX_SOLVE]> {
     const EPSILON: f64 = 1e-6;
     vec.into_iter()
         .filter(|&t| -EPSILON <= t && t <= 1.0 + EPSILON)
@@ -152,7 +137,7 @@ mod tests {
         assert_approx_eq!(bez.eval(1.0), bez.p3);
 
         let point = Point::new(32.7, 8.5);
-        assert_approx_eq!(bez.eval(0.3), point, tolerance=0.1);
+        assert_approx_eq!(bez.eval(0.3), point, tolerance = 0.1);
     }
 
     fn test_curves() -> Vec<PathSeg> {
@@ -182,10 +167,26 @@ mod tests {
             for &t in &[0.01, 0.2, 0.5, 0.7, 0.99] {
                 let Point { x, y } = seg.eval(t);
 
-                assert_approx_eq!(seg.solve_t_for_x(x).to_vec(), vec![t], tolerance=eps);
-                assert_approx_eq!(seg.solve_t_for_y(y).to_vec(), vec![t], tolerance=eps);
-                assert_approx_eq!(seg.solve_y_for_x(x).to_vec(), vec![y], tolerance=eps);
-                assert_approx_eq!(seg.solve_x_for_y(y).to_vec(), vec![x], tolerance=eps);
+                assert_approx_eq!(
+                    seg.solve_t_for_x(x).to_vec(),
+                    vec![t],
+                    tolerance = eps
+                );
+                assert_approx_eq!(
+                    seg.solve_t_for_y(y).to_vec(),
+                    vec![t],
+                    tolerance = eps
+                );
+                assert_approx_eq!(
+                    seg.solve_y_for_x(x).to_vec(),
+                    vec![y],
+                    tolerance = eps
+                );
+                assert_approx_eq!(
+                    seg.solve_x_for_y(y).to_vec(),
+                    vec![x],
+                    tolerance = eps
+                );
             }
         }
     }

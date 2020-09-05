@@ -1,7 +1,7 @@
-use std::ops::Mul;
+use super::*;
 use arrayvec::{Array, ArrayVec};
 use kurbo::MAX_EXTREMA;
-use super::*;
+use std::ops::Mul;
 
 /// A wrapper for curves that are monotone in both dimensions.
 ///
@@ -20,41 +20,25 @@ impl<C: ParamCurve> Monotone<C> {
     /// The start/end point which is more to the left.
     pub fn left_point(&self) -> Point {
         let (start, end) = self.points();
-        if start.x < end.x {
-            start
-        } else {
-            end
-        }
+        if start.x < end.x { start } else { end }
     }
 
     /// The start/end point which is more to the right.
     pub fn right_point(&self) -> Point {
         let (start, end) = self.points();
-        if start.x > end.x {
-            start
-        } else {
-            end
-        }
+        if start.x > end.x { start } else { end }
     }
 
     /// The start/end point which is more to the top.
     pub fn top_point(&self) -> Point {
         let (start, end) = self.points();
-        if start.y < end.y {
-            start
-        } else {
-            end
-        }
+        if start.y < end.y { start } else { end }
     }
 
     /// The start/end point which is more to the bottom.
     pub fn bot_point(&self) -> Point {
         let (start, end) = self.points();
-        if start.y > end.y {
-            start
-        } else {
-            end
-        }
+        if start.y > end.y { start } else { end }
     }
 }
 
@@ -128,7 +112,7 @@ impl<C: ParamCurveSolve> Monotone<C> {
 }
 
 /// Extract exactly one root or panic.
-fn single_root<A: Array<Item=f64>>(vec: ArrayVec<A>) -> f64 {
+fn single_root<A: Array<Item = f64>>(vec: ArrayVec<A>) -> f64 {
     match vec.as_slice() {
         [x] => *x,
         [] => panic!("there should be at least one root"),
@@ -146,7 +130,7 @@ impl Monotone<PathSeg> {
     /// and falling back to bounding box search if not.
     pub fn intersect<A>(&self, other: &Self, accuracy: f64) -> ArrayVec<A>
     where
-        A: Array<Item=Point>
+        A: Array<Item = Point>,
     {
         match (self.0, other.0) {
             (seg, PathSeg::Line(line)) | (PathSeg::Line(line), seg) => {
@@ -252,9 +236,9 @@ mod tests {
     fn test_solve_min_and_max_x_for_monotone_curve() {
         let line = line();
 
-        assert_approx_eq!(line.solve_max_x(25.0..30.0), 30.0);
-        assert_approx_eq!(line.solve_min_x(25.0..30.0), 10.0);
-        assert_approx_eq!(line.reverse().solve_max_x(25.0..30.0), 30.0);
-        assert_approx_eq!(line.reverse().solve_min_x(25.0..30.0), 10.0);
+        assert_approx_eq!(line.solve_max_x(25.0 .. 30.0), 30.0);
+        assert_approx_eq!(line.solve_min_x(25.0 .. 30.0), 10.0);
+        assert_approx_eq!(line.reverse().solve_max_x(25.0 .. 30.0), 30.0);
+        assert_approx_eq!(line.reverse().solve_min_x(25.0 .. 30.0), 10.0);
     }
 }

@@ -1,7 +1,7 @@
 //! Approximate and other comparisons.
 
-use std::cmp::Ordering;
 use super::primitive::Range;
+use std::cmp::Ordering;
 
 /// A comparison function for partial orderings.
 ///
@@ -51,17 +51,15 @@ impl ApproxEq for f64 {
 
 impl<T: ApproxEq> ApproxEq for Vec<T> {
     fn approx_eq(&self, other: &Self, tolerance: f64) -> bool {
-        self.len() == other.len() &&
-        self.iter().zip(other)
-            .all(|(x, y)| x.approx_eq(y, tolerance))
+        self.len() == other.len()
+            && self.iter().zip(other).all(|(x, y)| x.approx_eq(y, tolerance))
     }
 }
 
 impl<T: ApproxEq> ApproxEq for [T] {
     fn approx_eq(&self, other: &Self, tolerance: f64) -> bool {
-        self.len() == other.len() &&
-        self.iter().zip(other)
-            .all(|(x, y)| x.approx_eq(y, tolerance))
+        self.len() == other.len()
+            && self.iter().zip(other).all(|(x, y)| x.approx_eq(y, tolerance))
     }
 }
 
@@ -149,7 +147,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "approximate assertion failed:\n  left: `1.2`,\n right: `1.3`")]
+    #[should_panic(
+        expected = "approximate assertion failed:\n  left: `1.2`,\n right: `1.3`"
+    )]
     fn test_macro_works_basic_when_not_approx_equal() {
         assert_approx_eq!(1.2, 1.3);
     }
@@ -161,19 +161,25 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "approximate assertion failed:\n  left: `1.5`,\n right: `2.5`")]
+    #[should_panic(
+        expected = "approximate assertion failed:\n  left: `1.5`,\n right: `2.5`"
+    )]
     fn test_macro_works_with_tolerance_when_not_approx_equal() {
         assert_approx_eq!(1.5, 2.5, tolerance = 0.7);
     }
 
     #[test]
-    #[should_panic(expected = "approximate assertion failed:\n  left: `1.5`,\n right: `2.0`: this is okay")]
+    #[should_panic(
+        expected = "approximate assertion failed:\n  left: `1.5`,\n right: `2.0`: this is okay"
+    )]
     fn test_macro_works_with_message() {
         assert_approx_eq!(1.5, 2.0, "{} is okay", "this");
     }
 
     #[test]
-    #[should_panic(expected = "approximate assertion failed:\n  left: `1.5`,\n right: `2.0`: this is okay")]
+    #[should_panic(
+        expected = "approximate assertion failed:\n  left: `1.5`,\n right: `2.0`: this is okay"
+    )]
     fn test_macro_works_with_message_and_tolerance() {
         assert_approx_eq!(1.5, 2.0, tolerance = 0.3, "{} is okay", "this");
     }

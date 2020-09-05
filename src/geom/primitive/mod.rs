@@ -3,8 +3,8 @@
 mod dim;
 mod linear;
 
-pub use kurbo::{Affine, Insets, Point, Size, TranslateScale, Vec2};
 pub use dim::{Dim, VDim};
+pub use kurbo::{Affine, Insets, Point, Size, TranslateScale, Vec2};
 pub use linear::Linear;
 
 /// A float range.

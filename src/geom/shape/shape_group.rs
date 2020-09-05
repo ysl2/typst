@@ -1,7 +1,7 @@
+use super::*;
+use crate::geom::cmp::{position, value_approx, value_no_nans};
 use arrayvec::ArrayVec;
 use smallvec::SmallVec;
-use crate::geom::cmp::{value_no_nans, value_approx, position};
-use super::*;
 
 /// A data structure for fast, collisionless placement of objects into a group
 /// of bezier shapes.
@@ -39,20 +39,20 @@ struct Region {
 }
 
 // Types for shape group construction.
-#[derive(Copy, Clone)]
-enum Kind { Old, New }
 type Splits = Vec<f64>;
 type Segment = Monotone<PathSeg>;
 type Monotones = Vec<(Segment, Kind)>;
 
+#[derive(Copy, Clone)]
+enum Kind {
+    Old,
+    New,
+}
+
 impl ShapeGroup {
     /// Create a new shape group.
     pub fn new(accuracy: f64) -> ShapeGroup {
-        ShapeGroup {
-            rows: vec![],
-            regions: vec![],
-            accuracy,
-        }
+        ShapeGroup { rows: vec![], regions: vec![], accuracy }
     }
 
     /// Add a new area into which objects can be placed (`blocks = false`) /
@@ -112,7 +112,7 @@ impl ShapeGroup {
 
         // Split at intersection points.
         for (i, (a, _)) in monotone.iter().enumerate().skip(old_curves) {
-            for (b, _) in &monotone[..i] {
+            for (b, _) in &monotone[.. i] {
                 for p in a.intersect::<[_; 3]>(b, self.accuracy) {
                     splits.push(p.y);
                 }
@@ -127,20 +127,18 @@ impl ShapeGroup {
     }
 
     /// Create rows of borders by splitting the monotones.
-    fn apply_splits(
-        &self,
-        monotone: Monotones,
-        splits: Splits,
-    ) -> Vec<Monotones> {
+    fn apply_splits(&self, monotone: Monotones, splits: Splits) -> Vec<Monotones> {
         // Fit the segments into rows of borders.
         let len = splits.len().saturating_sub(1);
         let mut borders = vec![vec![]; len];
 
         for (seg, kind) in monotone {
             let (top, bot) = (seg.start().y, seg.end().y);
-            let find_k = |y| splits
-                .binary_search_by(|v| value_approx(&v, &y, self.accuracy))
-                .expect("splits should contain y");
+            let find_k = |y| {
+                splits
+                    .binary_search_by(|v| value_approx(&v, &y, self.accuracy))
+                    .expect("splits should contain y")
+            };
 
             // Find out in which row the segment starts and in which it ends.
             let i = find_k(top);
@@ -275,13 +273,9 @@ impl ShapeGroup {
                     // then know that the bottom end of the top region and
                     // top end of the bottom region are tight.
                     if i != j {
-                        let left = r.start
-                            .max(t.left.end().x)
-                            .max(b.left.start().x);
+                        let left = r.start.max(t.left.end().x).max(b.left.start().x);
 
-                        let right = r.end
-                            .min(t.right.end().x)
-                            .min(b.right.start().x);
+                        let right = r.end.min(t.right.end().x).min(b.right.start().x);
 
                         r = left .. right;
                     }
@@ -318,11 +312,13 @@ impl ShapeGroup {
         }
 
         // The rectangle occupied by the object when placed at `p`.
-        let bounds = |p| Rect::from_points(p, p + size.to_vec2())
-            .inset((-2.0 * self.accuracy, 0.0));
+        let bounds = |p| {
+            Rect::from_points(p, p + size.to_vec2()).inset((-2.0 * self.accuracy, 0.0))
+        };
 
         // Check placing directly at the top.
-        let top_x = r.start
+        let top_x = r
+            .start
             .max(t.left.solve_max_x(top .. top + size.height))
             .max(b.left.solve_max_x(top .. top + size.height));
 
@@ -344,7 +340,7 @@ impl ShapeGroup {
         let pairs = [
             (t.left, mx * t.right),
             (t.left, mx * my * b.right),
-            (my * b.left, mx * t.right)
+            (my * b.left, mx * t.right),
         ];
 
         for (left, right) in &pairs {
@@ -371,8 +367,7 @@ impl ShapeGroup {
         // Find and verify the best position.
         for p in points {
             let rect = bounds(p);
-            let fits =
-                top < rect.y0 + self.accuracy
+            let fits = top < rect.y0 + self.accuracy
                 && rect.y1 < b.bot() + self.accuracy
                 && rect.x0 > r.start
                 && rect.x1 < r.end
@@ -402,13 +397,10 @@ impl ShapeGroup {
     /// <line y1="45" x2="300" y2="45" stroke="#EC2B2B" stroke-width="2"/>
     /// <line y1="125" x2="300" y2="125" stroke="#EC2B2B" stroke-width="2"/>
     /// </svg>
-    pub fn ranges<'a>(
-        &'a self,
-        vr: Range
-    ) -> impl Iterator<Item=Range> + 'a {
+    pub fn ranges<'a>(&'a self, vr: Range) -> impl Iterator<Item = Range> + 'a {
         struct MaybeIterator<I>(Option<I>);
 
-        impl<I: Iterator<Item=Range>> Iterator for MaybeIterator<I> {
+        impl<I: Iterator<Item = Range>> Iterator for MaybeIterator<I> {
             type Item = Range;
 
             fn next(&mut self) -> Option<Range> {
@@ -419,16 +411,16 @@ impl ShapeGroup {
         let maybe_i = self.find_row(vr.start);
         let maybe_j = self.find_row(vr.end);
 
-        MaybeIterator(maybe_i.and_then(move |i| maybe_j.map(move |j| {
-            self.combinations(i, j)
-                .map(move |(t, r, b)| {
+        MaybeIterator(maybe_i.and_then(move |i| {
+            maybe_j.map(move |j| {
+                self.combinations(i, j).map(move |(t, r, b)| {
                     let tr = t.range(vr.clone());
                     let br = b.range(vr.clone());
 
-                    r.start.max(tr.start).max(br.start)
-                    .. r.end.min(tr.end).min(br.end)
+                    r.start.max(tr.start).max(br.start) .. r.end.min(tr.end).min(br.end)
                 })
-        })))
+            })
+        }))
     }
 
     /// All overlapping combinations of top regions in row `i`, middle ranges
@@ -437,13 +429,12 @@ impl ShapeGroup {
         &self,
         i: usize,
         j: usize,
-    ) -> impl Iterator<Item=(&Region, Range, &Region)> {
+    ) -> impl Iterator<Item = (&Region, Range, &Region)> {
         let mut done = false;
         let mut top_regions = self.regions(i);
         let mut bot_regions = self.regions(j);
-        let mut mid_regions: SmallVec<[_; 3]> = (i + 1 .. j)
-            .map(|m| self.regions(m))
-            .collect();
+        let mut mid_regions: SmallVec<[_; 3]> =
+            (i + 1 .. j).map(|m| self.regions(m)).collect();
 
         // Ensure that the rows are contiguous.
         let mut last_bot = self.rows[i].bot;
@@ -459,35 +450,35 @@ impl ShapeGroup {
         // all middle rows and the bottom region.
         // This computes the intersection of the top & bottom regions outer
         // ranges with the middle regions inner ranges.
-        std::iter::from_fn(move || loop {
-            if done {
-                return None;
+        std::iter::from_fn(move || {
+            while !done {
+                let (t, b) = (&top_regions[0], &bot_regions[0]);
+                let (tr, br) = (t.max_range(), b.max_range());
+
+                let mut start = tr.start.max(br.start);
+                let mut end = tr.end.min(br.end);
+                let mut min = if tr.end < br.end {
+                    &mut top_regions
+                } else {
+                    &mut bot_regions
+                };
+
+                for m in &mut mid_regions {
+                    let range = m[0].min_range();
+                    min = if range.end < end { m } else { min };
+                    start = start.max(range.start);
+                    end = end.min(range.end);
+                }
+
+                *min = &min[1 ..];
+                done = min.is_empty();
+
+                if start < end {
+                    return Some((t, start .. end, b));
+                }
             }
 
-            let (t, b) = (&top_regions[0], &bot_regions[0]);
-            let (tr, br) = (t.max_range(), b.max_range());
-
-            let mut start = tr.start.max(br.start);
-            let mut end = tr.end.min(br.end);
-            let mut min = if tr.end < br.end {
-                &mut top_regions
-            } else {
-                &mut bot_regions
-            };
-
-            for m in &mut mid_regions {
-                let range = m[0].min_range();
-                min = if range.end < end { m } else { min };
-                start = start.max(range.start);
-                end = end.min(range.end);
-            }
-
-            *min = &min[1..];
-            done = min.is_empty();
-
-            if start < end {
-                return Some((t, start .. end, b));
-            }
+            None
         })
     }
 }
@@ -527,7 +518,7 @@ impl ShapeGroup {
             let bot = PathSeg::Line(Line::new(r.right.end(), r.left.end()));
 
             path.extend(BezPath::from_path_segments(
-                [top, r.right.0, bot, r.left.0.reverse()].iter().copied()
+                [top, r.right.0, bot, r.left.0.reverse()].iter().copied(),
             ));
         }
         path
@@ -577,6 +568,7 @@ impl Region {
 }
 
 #[cfg(test)]
+#[rustfmt::skip]
 mod tests {
     use super::*;
 

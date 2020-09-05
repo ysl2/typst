@@ -2,7 +2,7 @@
 
 use arrayvec::ArrayVec;
 
-pub use kurbo::common::{solve_quadratic, solve_cubic};
+pub use kurbo::common::{solve_cubic, solve_quadratic};
 
 /// Find roots of linear equation.
 pub fn solve_linear(c0: f64, c1: f64) -> ArrayVec<[f64; 1]> {

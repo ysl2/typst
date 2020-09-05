@@ -1,5 +1,5 @@
-use arrayvec::{Array, ArrayVec};
 use super::*;
+use arrayvec::{Array, ArrayVec};
 
 /// Find the intersections of two curves recursively using bounding boxes.
 ///
@@ -19,7 +19,7 @@ use super::*;
 pub fn find_intersections_bbox<C, A>(a: &C, b: &C, accuracy: f64) -> ArrayVec<A>
 where
     C: ParamCurveExtrema,
-    A: Array<Item=Point>,
+    A: Array<Item = Point>,
 {
     let mut result = ArrayVec::new();
 
@@ -53,9 +53,7 @@ where
     let mut extend = |values: ArrayVec<A>| {
         for point in values {
             // We don't want to count intersections twice.
-            if !result.is_full() &&
-               !result.iter().any(|p| p.approx_eq(&point, double))
-            {
+            if !result.is_full() && !result.iter().any(|p| p.approx_eq(&point, double)) {
                 result.push(point);
             }
         }
@@ -71,8 +69,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::geom::cmp::value_no_nans;
     use super::*;
+    use crate::geom::cmp::value_no_nans;
 
     fn seg(d: &str) -> PathSeg {
         BezPath::from_svg(d).unwrap().segments().next().unwrap()
