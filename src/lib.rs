@@ -81,7 +81,7 @@ impl<T> Pass<T> {
     }
 
     /// Create a new pass with empty feedback.
-    pub fn okay(output: T) -> Self {
+    pub fn ok(output: T) -> Self {
         Self { output, feedback: Feedback::new() }
     }
 

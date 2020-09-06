@@ -121,10 +121,10 @@ impl PageStyle {
         let size = self.size;
         let default = self.class.default_margins();
         Insets {
-            x0: self.margins[0].unwrap_or(default[0]).raw_scaled(size.width),
-            y0: self.margins[1].unwrap_or(default[1]).raw_scaled(size.height),
-            x1: self.margins[2].unwrap_or(default[2]).raw_scaled(size.width),
-            y1: self.margins[3].unwrap_or(default[3]).raw_scaled(size.height),
+            x0: -self.margins[0].unwrap_or(default[0]).raw_scaled(size.width),
+            y0: -self.margins[1].unwrap_or(default[1]).raw_scaled(size.height),
+            x1: -self.margins[2].unwrap_or(default[2]).raw_scaled(size.width),
+            y1: -self.margins[3].unwrap_or(default[3]).raw_scaled(size.height),
         }
     }
 }

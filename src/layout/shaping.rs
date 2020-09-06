@@ -100,7 +100,7 @@ impl<'a> Shaper<'a> {
         self.shaped.glyphs.push(glyph);
         self.shaped.offsets.push(self.layout.dim.width - self.offset);
 
-        self.offset += char_width;
+        self.layout.dim.width += char_width;
     }
 
     async fn select_font(&mut self, c: char) -> Option<(FaceId, GlyphId, f64)> {
@@ -125,14 +125,15 @@ impl<'a> Shaper<'a> {
         };
 
         if let Some((id, face)) = self.opts.loader.query(query).await {
+            let font_size = self.opts.style.font_size();
+
             let units_per_em = face.units_per_em().unwrap_or(1000) as f64;
             let ratio = 1.0 / units_per_em;
-            let to_raw = |x| ratio * x as f64;
+            let to_raw = |x| ratio * x as f64 * font_size;
 
             // Determine the width of the char.
             let glyph = face.glyph_index(c)?;
             let glyph_width = to_raw(face.glyph_hor_advance(glyph)? as i32);
-            let char_width = glyph_width * self.opts.style.font_size();
 
             // Expand height and depth of the layout.
             let ascender =
@@ -144,7 +145,7 @@ impl<'a> Shaper<'a> {
             self.layout.dim.height = self.layout.dim.height.max(to_raw(ascender));
             self.layout.dim.depth = self.layout.dim.depth.max(to_raw(-descender));
 
-            Some((id, glyph, char_width))
+            Some((id, glyph, glyph_width))
         } else {
             None
         }

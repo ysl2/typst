@@ -1,3 +1,4 @@
+use super::super::shape::Rect;
 use super::{Range, Size};
 use std::cmp::Ordering;
 use std::fmt;
@@ -36,6 +37,11 @@ impl Dim {
     /// `depth`.
     pub fn to_size(self) -> Size {
         Size::new(self.width, self.height + self.depth)
+    }
+
+    /// Convert this dimension to a rect with the basepoint at `(0.0, 0.0)`.
+    pub fn to_rect(self) -> Rect {
+        Rect::new(0.0, -self.height, self.width, self.depth)
     }
 }
 

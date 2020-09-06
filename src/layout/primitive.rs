@@ -5,6 +5,7 @@ use std::fmt::{self, Display, Formatter};
 use Dir::*;
 use GenAlign::*;
 use GenAxis::*;
+use Side::*;
 use SpecAxis::*;
 
 /// Specifies the directions into which content is laid out.
@@ -95,6 +96,26 @@ pub enum Dir {
 }
 
 impl Dir {
+    /// The side this direction starts at.
+    pub fn start(self) -> Side {
+        match self {
+            LTR => Left,
+            RTL => Right,
+            TTB => Top,
+            BTT => Bottom,
+        }
+    }
+
+    /// The side this direction ends at.
+    pub fn end(self) -> Side {
+        match self {
+            LTR => Right,
+            RTL => Left,
+            TTB => Bottom,
+            BTT => Top,
+        }
+    }
+
     /// The specific axis this direction belongs to.
     pub fn axis(self) -> SpecAxis {
         match self {
@@ -141,6 +162,15 @@ impl Display for Dir {
             BTT => "btt",
         })
     }
+}
+
+/// A side of a container.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub enum Side {
+    Left,
+    Top,
+    Right,
+    Bottom,
 }
 
 /// The two generic layouting axes.
