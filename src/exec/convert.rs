@@ -1,13 +1,14 @@
 use std::ops::Deref;
 
+use fontdock::{FontStyle, FontWeight, FontWidth};
+
 use super::value::{FuncValue, TableValue, Value};
+use crate::dom::DomTree;
 use crate::layout::{Dir, SpecAlign};
 use crate::length::{Length, ScaleLength};
 use crate::paper::Paper;
-use crate::syntax::span::Spanned;
-use crate::syntax::tree::{Ident, SyntaxTree};
+use crate::syntax::{Ident, Spanned};
 use crate::Feedback;
-use fontdock::{FontStyle, FontWeight, FontWidth};
 
 /// A trait for converting values into more specific types.
 pub trait TryFromValue: Sized {
@@ -78,7 +79,7 @@ impl_match!(String, "string", Value::Str(s) => s.clone());
 impl_match!(bool, "bool", &Value::Bool(b) => b);
 impl_match!(f64, "number", &Value::Number(n) => n);
 impl_match!(Length, "length", &Value::Length(l) => l);
-impl_match!(SyntaxTree, "tree", Value::Tree(t) => t.clone());
+impl_match!(DomTree, "tree", Value::Tree(t) => t.clone());
 impl_match!(TableValue, "table", Value::Table(t) => t.clone());
 impl_match!(FuncValue, "function", Value::Func(f) => f.clone());
 impl_match!(ScaleLength, "number or length",

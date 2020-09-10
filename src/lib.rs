@@ -2,21 +2,28 @@
 //!
 //! # Steps
 //! - **Parsing:** The parsing step first transforms a plain string into an
-//!   [iterator of tokens][tokens]. Then, a parser constructs a syntax tree from
+//!   [iterator of tokens][tokens]. Then, a [parser] constructs a syntax tree from
 //!   the token stream. The structures describing the tree can be found in the
-//!   [syntax::tree] module.
-//! - **Layouting:** The next step is to transform the syntax tree into a
-//!   portable representation of the typesetted document. Types for these can be
-//!   found in the [layout] module. The final output ready for exporting is a
-//!   [`Vec<Layout>`] consisting of multiple layouts (or pages).
-//! - **Exporting:** The finished layouts can then be exported into a supported
-//!   format. Submodules for these formats are located in the [export] module.
+//!   [syntax] module.
+//! - **Execution:** The next step is to [execute] the parsed "script" to build a
+//!   reusable [DOM-like representation] of the document. The DOM nodes are
+//!   self-contained with their style and thus order-independent. This lack of
+//!   global state makes the DOM much better suited for layouting than the syntax tree.
+//! - **Layouting:** The next step is to transform the DOM tree into a
+//!   portable representation of the typesetted document. Types for this can be
+//!   found in the [layout] module. The final output consists of a vector of
+//!   [`Layouts`] (or pages), ready for exporting.
+//! - **Exporting:** The finished layouts can finally be exported into a supported
+//!   output format. Submodules for these formats are located in the [export] module.
 //!   Currently, the only supported output format is [_PDF_].
 //!
-//! [tokens]: syntax/tokens/struct.Tokens.html
-//! [syntax::tree]: syntax/tree/index.html
+//! [tokens]: parsing/struct.Tokens.html
+//! [parser]: parsing/fn.parse.html
+//! [syntax]: syntax/index.html
+//! [execute]: exec/fn.exec.html
+//! [DOM-like representation]: dom/index.html
 //! [layout]: layout/index.html
-//! [`Vec<Layout>`]: layout/struct.Layout.html
+//! [`Layouts`]: layout/struct.Layout.html
 //! [export]: export/index.html
 //! [_PDF_]: export/pdf/index.html
 
@@ -26,43 +33,50 @@ mod macros;
 pub mod diagnostic;
 
 pub mod color;
-pub mod compute;
+pub mod dom;
+pub mod exec;
 pub mod export;
 pub mod font;
 pub mod geom;
 pub mod layout;
 pub mod length;
-// pub mod library;
+pub mod library;
 pub mod paper;
+pub mod parse;
 pub mod prelude;
-pub mod style;
 pub mod syntax;
 
 use std::fmt::Debug;
 use std::future::Future;
 use std::pin::Pin;
+use std::rc::Rc;
 
 use crate::diagnostic::Diagnostics;
+use crate::dom::Style;
+use crate::exec::Scope;
 use crate::font::SharedFontLoader;
-use crate::layout::{layout, Layout, State};
-use crate::syntax::decoration::Decorations;
-use crate::syntax::parse;
-use crate::syntax::span::{Offset, Pos};
+use crate::layout::Layout;
+use crate::syntax::{Decos, Offset, Pos};
 
 /// A dynamic future type which allows recursive invocation of async functions
 /// when used as the return type.
 pub type DynFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
-/// Layout source code directly (combines the parsing and layouting steps).
+/// Layout source code directly (combines parsing, execution and layouting).
 pub async fn typeset(
     src: &str,
     loader: SharedFontLoader,
-    state: State,
+    style: Rc<Style>,
+    funcs: Scope,
 ) -> Pass<Vec<Layout>> {
-    let parsed = parse(src);
-    let layouted = layout(&parsed.output, loader, state).await;
-    let feedback = Feedback::merge(parsed.feedback, layouted.feedback);
-    Pass::new(layouted.output, feedback)
+    let Pass { output: tree, mut feedback } = parse::parse(src);
+    let Pass { output: dom, feedback: f2 } = exec::exec(tree, style, funcs);
+    let Pass { output: layouts, feedback: f3 } = layout::layout(&dom, loader).await;
+
+    feedback.extend(f2);
+    feedback.extend(f3);
+
+    Pass::new(layouts, feedback)
 }
 
 /// The result of some pass: Some output `T` and feedback data.
@@ -100,13 +114,13 @@ pub struct Feedback {
     /// Diagnostics about the source code.
     pub diagnostics: Diagnostics,
     /// Decorations of the source code for semantic syntax highlighting.
-    pub decorations: Decorations,
+    pub decos: Decos,
 }
 
 impl Feedback {
     /// Create a new feedback instance without errors and decos.
     pub fn new() -> Self {
-        Self { diagnostics: vec![], decorations: vec![] }
+        Self { diagnostics: vec![], decos: vec![] }
     }
 
     /// Merged two feedbacks into one.
@@ -118,13 +132,13 @@ impl Feedback {
     /// Add other feedback data to this feedback.
     pub fn extend(&mut self, more: Self) {
         self.diagnostics.extend(more.diagnostics);
-        self.decorations.extend(more.decorations);
+        self.decos.extend(more.decos);
     }
 
     /// Add more feedback whose spans are local and need to be offset by an
     /// `offset` to be correct in this feedback's context.
     pub fn extend_offset(&mut self, more: Self, offset: Pos) {
         self.diagnostics.extend(more.diagnostics.offset(offset));
-        self.decorations.extend(more.decorations.offset(offset));
+        self.decos.extend(more.decos.offset(offset));
     }
 }

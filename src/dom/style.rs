@@ -1,5 +1,7 @@
 //! Styles for text and pages.
 
+use std::rc::Rc;
+
 use fontdock::{fallback, FallbackTree, FontStyle, FontVariant, FontWeight, FontWidth};
 
 use crate::geom::{Insets, Size};
@@ -8,18 +10,18 @@ use crate::paper::{Paper, PaperClass, PAPER_A4};
 
 /// Defines properties of pages and text.
 #[derive(Debug, Default, Clone, PartialEq)]
-pub struct LayoutStyle {
+pub struct Style {
     /// The style for text.
-    pub text: TextStyle,
+    pub text: Rc<TextStyle>,
     /// The style for pages.
-    pub page: PageStyle,
+    pub page: Rc<PageStyle>,
 }
 
 /// Defines which fonts to use and how to space text.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextStyle {
     /// A tree of font family names and generic class names.
-    pub fallback: FallbackTree,
+    pub fallback: Rc<FallbackTree>,
     /// The selected font variant.
     pub variant: FontVariant,
     /// Whether the bolder toggle is active or inactive. This determines
@@ -65,7 +67,7 @@ impl TextStyle {
 impl Default for TextStyle {
     fn default() -> Self {
         Self {
-            fallback: fallback! {
+            fallback: Rc::new(fallback! {
                 list: ["sans-serif"],
                 classes: {
                     "serif" => ["source serif pro", "noto serif"],
@@ -77,7 +79,7 @@ impl Default for TextStyle {
                     "source sans pro", "noto sans", "segoe ui emoji",
                     "noto emoji", "latin modern math",
                 ],
-            },
+            }),
             variant: FontVariant {
                 style: FontStyle::Normal,
                 weight: FontWeight(400),

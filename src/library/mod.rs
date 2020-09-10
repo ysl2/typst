@@ -1,5 +1,6 @@
 //! The standard library.
 
+/*
 mod align;
 mod boxed;
 mod color;
@@ -45,4 +46,12 @@ std! {
     "pagebreak" => pagebreak,
     "rgb" => rgb,
     "v" => v,
+}
+*/
+
+use crate::exec::Scope;
+
+/// Create a scope with all standard library functions.
+pub fn _std() -> Scope {
+    Scope::new()
 }

@@ -2,15 +2,11 @@
 
 use std::fmt::{self, Debug, Formatter};
 
-use super::decoration::Decoration;
 use super::span::{SpanVec, Spanned};
-use super::tokens::is_ident;
 use crate::color::RgbaColor;
-use crate::compute::table::{SpannedEntry, Table};
-use crate::compute::{TableValue, Value};
-use crate::layout::Env;
+use crate::exec::table::{SpannedEntry, Table};
 use crate::length::Length;
-use crate::DynFuture;
+use crate::parse::is_ident;
 
 /// A collection of nodes which form a tree together with the nodes' children.
 pub type SyntaxTree = SpanVec<SyntaxNode>;
@@ -20,7 +16,7 @@ pub type SyntaxTree = SpanVec<SyntaxNode>;
 #[derive(Debug, Clone, PartialEq)]
 pub enum SyntaxNode {
     /// Whitespace containing less than two newlines.
-    Spacing,
+    Space,
     /// A forced line break.
     Linebreak,
     /// A paragraph break.
@@ -34,7 +30,7 @@ pub enum SyntaxNode {
     /// Section headings.
     Heading(Heading),
     /// Lines of raw text.
-    Raw(Vec<String>),
+    Raw(Raw),
     /// An optionally highlighted (multi-line) code block.
     Code(Code),
     /// A function call.
@@ -49,12 +45,51 @@ pub struct Heading {
     pub tree: SyntaxTree,
 }
 
+/// Raw text.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Raw {
+    pub lines: Vec<String>,
+}
+
 /// A code block.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Code {
     pub lang: Option<Spanned<Ident>>,
     pub lines: Vec<String>,
     pub block: bool,
+}
+
+/// An invocation of a function.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Call {
+    pub name: Spanned<Ident>,
+    pub args: TableExpr,
+}
+
+/// An identifier as defined by unicode with a few extra permissible characters.
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct Ident(pub String);
+
+impl Ident {
+    /// Create a new identifier from a string checking that it is a valid.
+    pub fn new(ident: impl AsRef<str> + Into<String>) -> Option<Self> {
+        if is_ident(ident.as_ref()) {
+            Some(Self(ident.into()))
+        } else {
+            None
+        }
+    }
+
+    /// Return a reference to the underlying string.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl Debug for Ident {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "`{}`", self.0)
+    }
 }
 
 /// An expression.
@@ -112,27 +147,6 @@ impl Expr {
             Div(_, _) => "division",
         }
     }
-
-    /// Evaluate the expression to a value.
-    pub async fn eval(&self, env: &mut Env) -> Value {
-        use Expr::*;
-        match self {
-            Ident(i) => Value::Ident(i.clone()),
-            Str(s) => Value::Str(s.clone()),
-            &Bool(b) => Value::Bool(b),
-            &Number(n) => Value::Number(n),
-            &Length(s) => Value::Length(s),
-            &Color(c) => Value::Color(c),
-            Table(t) => Value::Table(t.eval(env).await),
-            Tree(t) => Value::Tree(t.clone()),
-            Call(call) => call.eval(env).await,
-            Neg(_) => todo!("eval neg"),
-            Add(_, _) => todo!("eval add"),
-            Sub(_, _) => todo!("eval sub"),
-            Mul(_, _) => todo!("eval mul"),
-            Div(_, _) => todo!("eval div"),
-        }
-    }
 }
 
 impl Debug for Expr {
@@ -157,32 +171,6 @@ impl Debug for Expr {
     }
 }
 
-/// An identifier as defined by unicode with a few extra permissible characters.
-#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct Ident(pub String);
-
-impl Ident {
-    /// Create a new identifier from a string checking that it is a valid.
-    pub fn new(ident: impl AsRef<str> + Into<String>) -> Option<Self> {
-        if is_ident(ident.as_ref()) {
-            Some(Self(ident.into()))
-        } else {
-            None
-        }
-    }
-
-    /// Return a reference to the underlying string.
-    pub fn as_str(&self) -> &str {
-        self.0.as_str()
-    }
-}
-
-impl Debug for Ident {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "`{}`", self.0)
-    }
-}
-
 /// A table of expressions.
 ///
 /// # Example
@@ -190,47 +178,3 @@ impl Debug for Ident {
 /// (false, 12cm, greeting="hi")
 /// ```
 pub type TableExpr = Table<SpannedEntry<Expr>>;
-
-impl TableExpr {
-    /// Evaluate the table expression to a table value.
-    pub fn eval<'a>(&'a self, env: &'a mut Env) -> DynFuture<'a, TableValue> {
-        Box::pin(async move {
-            let mut table = TableValue::new();
-
-            for (key, entry) in self.iter() {
-                let val = entry.val.v.eval(env).await;
-                let spanned = Spanned::new(val, entry.val.span);
-                let entry = SpannedEntry::new(entry.key, spanned);
-                table.insert(key, entry);
-            }
-
-            table
-        })
-    }
-}
-
-/// An invocation of a function.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Call {
-    pub name: Spanned<Ident>,
-    pub args: TableExpr,
-}
-
-impl Call {
-    /// Evaluate the call expression to a value.
-    pub async fn eval(&self, env: &mut Env) -> Value {
-        let name = self.name.v.as_str();
-        let span = self.name.span;
-        let args = self.args.eval(env).await;
-
-        if let Some(func) = env.state.scope.func(name) {
-            (*func.clone())(span, args, env).await
-        } else {
-            if !name.is_empty() {
-                error!(@env.f, span, "unknown function");
-                env.f.decorations.push(Spanned::new(Decoration::Unresolved, span));
-            }
-            Value::Table(args)
-        }
-    }
-}

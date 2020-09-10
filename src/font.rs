@@ -1,4 +1,4 @@
-//! Font handling.
+//! Font handling shim.
 
 use std::cell::RefCell;
 use std::ops::Deref;

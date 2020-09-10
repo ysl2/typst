@@ -2,17 +2,16 @@
 
 use super::parse;
 use crate::color::RgbaColor;
-use crate::compute::table::SpannedEntry;
+use crate::exec::table::SpannedEntry;
 use crate::length::Length;
-use crate::syntax::decoration::Decoration::*;
-use crate::syntax::span::Spanned;
-use crate::syntax::tests::*;
-use crate::syntax::tree::*;
+use crate::parse::check::*;
+use crate::syntax::*;
 
 // ------------------------------ Construct Syntax Nodes ------------------------------ //
 
+use Deco::*;
 use SyntaxNode::{
-    Linebreak as L, Parbreak as P, Spacing as S, ToggleBolder as B, ToggleItalic as I,
+    Linebreak as L, Parbreak as P, Space as S, ToggleBolder as B, ToggleItalic as I,
 };
 
 fn T(text: &str) -> SyntaxNode {
@@ -30,7 +29,7 @@ macro_rules! H {
 
 macro_rules! R {
     ($($line:expr),* $(,)?) => {
-        SyntaxNode::Raw(vec![$($line.to_string()),*])
+        SyntaxNode::Raw(Raw { lines: vec![$($line.to_string()),*] })
     };
 }
 
@@ -157,7 +156,7 @@ macro_rules! d {
     ($src:expr => $($tts:tt)*) => {
         let exp = vec![$($tts)*];
         let pass = parse($src);
-        check($src, exp, pass.feedback.decorations, true);
+        check($src, exp, pass.feedback.decos, true);
     };
 }
 

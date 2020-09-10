@@ -9,8 +9,8 @@ use ttf_parser::GlyphId;
 
 use super::elements::{LayoutElement, Shaped};
 use super::*;
+use crate::dom::TextStyle;
 use crate::font::FontLoader;
-use crate::style::TextStyle;
 
 /// Shape text into a box.
 pub async fn shape(text: &str, opts: ShapeOptions<'_>) -> Layout {

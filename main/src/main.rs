@@ -7,9 +7,10 @@ use std::rc::Rc;
 use fontdock::fs::{FsIndex, FsProvider};
 use futures_executor::block_on;
 
+use typstc::dom::Style;
 use typstc::export::pdf;
 use typstc::font::FontLoader;
-use typstc::typeset;
+use typstc::{typeset, Pass};
 
 fn main() {
     let args: Vec<_> = std::env::args().collect();
@@ -36,14 +37,15 @@ fn main() {
     index.search_os();
 
     let (descriptors, files) = index.into_vecs();
-    let provider = FsProvider::new(files.clone());
+    let provider = FsProvider::new(files);
     let loader = FontLoader::new(Box::new(provider), descriptors);
     let loader = Rc::new(RefCell::new(loader));
+    let style = Rc::new(Style::default());
+    let funcs = typstc::library::_std();
 
-    let pass = block_on(typeset(&src, loader.clone(), Default::default()));
-    let layouts = pass.output;
+    let Pass { output: layouts, mut feedback } =
+        block_on(typeset(&src, Rc::clone(&loader), style, funcs));
 
-    let mut feedback = pass.feedback;
     feedback.diagnostics.sort();
     for diagnostic in feedback.diagnostics {
         let span = diagnostic.span;

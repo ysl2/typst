@@ -1,12 +1,10 @@
 use std::str::FromStr;
 
 use super::escaping::*;
+use super::*;
 use crate::color::RgbaColor;
-use crate::compute::table::SpannedEntry;
-use crate::syntax::decoration::Decoration;
-use crate::syntax::span::{Pos, Span, Spanned};
-use crate::syntax::tokens::{Token, TokenMode, Tokens};
-use crate::syntax::tree::*;
+use crate::exec::table::SpannedEntry;
+use crate::syntax::*;
 use crate::{Feedback, Pass};
 
 /// Parse a string of source code into a syntax tree.
@@ -77,7 +75,7 @@ impl Parser<'_> {
                 self.with_span(if n >= 2 {
                     SyntaxNode::Parbreak
                 } else {
-                    SyntaxNode::Spacing
+                    SyntaxNode::Space
                 })
             }
 
@@ -105,7 +103,9 @@ impl Parser<'_> {
                 if !terminated {
                     error!(@self.feedback, end, "expected backtick");
                 }
-                self.with_span(SyntaxNode::Raw(unescape_raw(raw)))
+
+                let lines = unescape_raw(raw);
+                self.with_span(SyntaxNode::Raw(Raw { lines }))
             }
 
             Token::Code { lang, raw, terminated } => {
@@ -305,9 +305,7 @@ impl Parser<'_> {
             if let Some(key) = key {
                 comma_and_keyless = false;
                 table.insert(key.v.0, SpannedEntry::new(key.span, val));
-                self.feedback
-                    .decorations
-                    .push(Spanned::new(Decoration::TableKey, key.span));
+                self.feedback.decos.push(Spanned::new(Deco::TableKey, key.span));
             } else {
                 table.push(SpannedEntry::val(val));
             }

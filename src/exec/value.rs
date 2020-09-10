@@ -6,12 +6,12 @@ use std::rc::Rc;
 
 use super::convert::TryFromValue;
 use super::table::{SpannedEntry, Table};
+use super::ExecCtx;
 use crate::color::RgbaColor;
-use crate::layout::Env;
+use crate::dom::DomTree;
 use crate::length::Length;
-use crate::syntax::span::{Span, Spanned};
-use crate::syntax::tree::{Ident, SyntaxNode, SyntaxTree};
-use crate::{DynFuture, Feedback};
+use crate::syntax::{Ident, Span, TableExpr};
+use crate::Feedback;
 
 /// A computational value.
 #[derive(Clone, PartialEq)]
@@ -32,8 +32,8 @@ pub enum Value {
     Color(RgbaColor),
     /// A table value: `(false, 12cm, greeting="hi")`.
     Table(TableValue),
-    /// A syntax tree containing typesetting content.
-    Tree(SyntaxTree),
+    /// A dom-tree containing layoutable content.
+    Tree(DomTree),
     /// An executable function.
     Func(FuncValue),
 }
@@ -58,42 +58,6 @@ impl Value {
     }
 }
 
-impl Spanned<Value> {
-    /// Transform this value into a syntax tree.
-    ///
-    /// If this is already a tree, it is simply unwrapped, otherwise it's transformed into
-    /// a tree that represents it reasonably.
-    pub fn repr_tree(self) -> SyntaxTree {
-        match self.v {
-            Value::Tree(tree) => tree,
-
-            // Forward to each entry, separated with spaces.
-            Value::Table(table) => {
-                let mut tree = SyntaxTree::new();
-
-                let mut end = None;
-                for entry in table.into_values() {
-                    if let Some(last_end) = end {
-                        let span = Span::new(last_end, entry.key.start);
-                        tree.push(Spanned::new(SyntaxNode::Spacing, span));
-                    }
-
-                    end = Some(entry.val.span.end);
-                    tree.extend(entry.val.repr_tree());
-                }
-
-                tree
-            }
-
-            // Fallback: Format with Debug.
-            val => vec![Spanned::new(
-                SyntaxNode::Text(format!("{:?}", val)),
-                self.span,
-            )],
-        }
-    }
-}
-
 impl Debug for Value {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         use Value::*;
@@ -114,18 +78,11 @@ impl Debug for Value {
 
 /// An executable function value.
 ///
-/// The first argument is a table containing the arguments passed to the
-/// function. The function may be asynchronous (as such it returns a dynamic
-/// future) and it may emit diagnostics, which are contained in the returned
-/// `Pass`. In the end, the function must evaluate to `Value`. Your typical
-/// typesetting function will return a `Commands` value which will instruct the
-/// layouting engine to do what the function pleases.
-///
 /// The dynamic function object is wrapped in an `Rc` to keep `Value` clonable.
 #[derive(Clone)]
 pub struct FuncValue(pub Rc<FuncType>);
 
-type FuncType = dyn Fn(Span, TableValue, &mut Env) -> DynFuture<Value>;
+type FuncType = dyn Fn(Span, TableExpr, &mut ExecCtx) -> Value;
 
 impl Deref for FuncValue {
     type Target = FuncType;
@@ -277,6 +234,7 @@ impl TableValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::syntax::Spanned;
 
     fn entry(value: Value) -> SpannedEntry<Value> {
         SpannedEntry::val(Spanned::zero(value))

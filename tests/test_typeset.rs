@@ -11,12 +11,13 @@ use futures_executor::block_on;
 use raqote::{DrawTarget, PathBuilder, SolidSource, Source, Transform, Vector};
 use ttf_parser::OutlineBuilder;
 
+use typstc::dom::Style;
 use typstc::export::pdf;
 use typstc::font::{FontLoader, SharedFontLoader};
 use typstc::geom::{Point, Vec2};
 use typstc::layout::elements::{LayoutElement, Shaped};
 use typstc::layout::Layout;
-use typstc::typeset;
+use typstc::{typeset, Pass};
 
 const TEST_DIR: &str = "tests";
 const OUT_DIR: &str = "tests/out";
@@ -57,21 +58,23 @@ fn main() {
     index.search_dir(FONT_DIR);
 
     let (descriptors, files) = index.into_vecs();
-    let provider = FsProvider::new(files.clone());
+    let provider = FsProvider::new(files);
     let loader = FontLoader::new(Box::new(provider), descriptors);
     let loader = Rc::new(RefCell::new(loader));
 
     for (name, path, src) in filtered {
-        test(&name, &src, &path, loader.clone())
+        test(&name, &src, &path, Rc::clone(&loader))
     }
 }
 
 fn test(name: &str, src: &str, path: &Path, loader: SharedFontLoader) {
     println!("Testing {}.", name);
 
-    let typeset = block_on(typeset(src, loader.clone(), Default::default()));
-    let layouts = typeset.output;
-    let mut feedback = typeset.feedback;
+    let style = Rc::new(Style::default());
+    let funcs = typstc::library::_std();
+
+    let Pass { output: layouts, mut feedback } =
+        block_on(typeset(&src, Rc::clone(&loader), style, funcs));
 
     feedback.diagnostics.sort();
     for diagnostic in feedback.diagnostics {

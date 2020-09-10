@@ -1,4 +1,4 @@
-//! Layouting of syntax trees into box layouts.
+//! Layouting of DOMs into collections of layouts.
 
 pub mod elements;
 pub mod primitive;
@@ -9,27 +9,22 @@ pub use primitive::*;
 
 use std::ops::Deref;
 
-use crate::compute::Scope;
+use crate::dom::{DomNode, DomTree};
 use crate::font::SharedFontLoader;
 use crate::geom::shape::{BezPath, Rect, ShapeGroup};
 use crate::geom::{Dim, Point, Size};
-use crate::style::LayoutStyle;
-use crate::syntax::tree::{SyntaxNode, SyntaxTree};
-use crate::{Feedback, Pass};
+use crate::Pass;
 
 use elements::LayoutElement;
 use shaping::{shape, ShapeOptions};
 use stack::{StackLayouter, StackOptions};
 
 /// Process a syntax tree into a collection of layouts.
-pub async fn layout(
-    tree: &SyntaxTree,
-    loader: SharedFontLoader,
-    state: State,
-) -> Pass<Vec<Layout>> {
+pub async fn layout(tree: &DomTree, loader: SharedFontLoader) -> Pass<Vec<Layout>> {
     let mut loader = loader.borrow_mut();
 
-    let page = &state.style.page;
+    // let page = &state.style.page;
+    let page = crate::dom::PageStyle::default();
     let margins = page.margins();
     let area = Area {
         size: page.size,
@@ -41,11 +36,11 @@ pub async fn layout(
     let mut stack = StackLayouter::new(areas, StackOptions { dir: Dir::TTB });
 
     for node in tree {
-        match &node.v {
-            SyntaxNode::Text(text) => {
+        match &node.v.node {
+            DomNode::Text(text) => {
                 let layout = shape(text, ShapeOptions {
                     loader: &mut loader,
-                    style: &state.style.text,
+                    style: &node.v.style.text,
                     dir: Dir::LTR,
                 })
                 .await;
@@ -58,26 +53,6 @@ pub async fn layout(
     }
 
     Pass::ok(stack.finish())
-}
-
-/// The layouting environment.
-pub struct Env {
-    /// The accumulated feedback.
-    pub f: Feedback,
-    /// The font loader to retrieve fonts from.
-    pub loader: SharedFontLoader,
-    /// The current execution state. As long as the available fonts are the same,
-    /// layouting is pure with respect to the layouted thing and this state.
-    pub state: State,
-}
-
-/// The execution state.
-#[derive(Debug, Default, Clone)]
-pub struct State {
-    /// The scope which contains function definitions.
-    pub scope: Scope,
-    /// The current style configuration.
-    pub style: LayoutStyle,
 }
 
 /// A layout consisting of atomic elements.

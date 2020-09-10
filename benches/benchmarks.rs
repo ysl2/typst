@@ -5,8 +5,9 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use fontdock::fs::{FsIndex, FsProvider};
 use futures_executor::block_on;
 
+use typstc::dom::Style;
 use typstc::font::FontLoader;
-use typstc::syntax::parse;
+use typstc::parse::parse;
 use typstc::typeset;
 
 const FONT_DIR: &str = "fonts";
@@ -25,19 +26,25 @@ fn typesetting_benchmark(c: &mut Criterion) {
     let mut index = FsIndex::new();
     index.search_dir(FONT_DIR);
 
-    let (descriptors, files) = index.clone().into_vecs();
-    let provider = FsProvider::new(files.clone());
+    let (descriptors, files) = index.into_vecs();
+    let provider = FsProvider::new(files);
     let loader = FontLoader::new(Box::new(provider), descriptors);
     let loader = Rc::new(RefCell::new(loader));
+    let style = Rc::new(Style::default());
+    let funcs = typstc::library::_std();
+    let typeset = |src| {
+        block_on(typeset(
+            src,
+            Rc::clone(&loader),
+            Rc::clone(&style),
+            funcs.clone(),
+        ))
+    };
 
-    c.bench_function("typeset-coma-28-lines", |b| {
-        b.iter(|| block_on(typeset(COMA, loader.clone(), Default::default())))
-    });
+    c.bench_function("typeset-coma-28-lines", |b| b.iter(|| typeset(COMA)));
 
     let long = COMA.repeat(100);
-    c.bench_function("typeset-coma-2800-lines", |b| {
-        b.iter(|| block_on(typeset(&long, loader.clone(), Default::default())))
-    });
+    c.bench_function("typeset-coma-2800-lines", |b| b.iter(|| typeset(&long)));
 }
 
 criterion_group!(benches, parsing_benchmark, typesetting_benchmark);
