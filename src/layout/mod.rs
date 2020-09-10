@@ -5,17 +5,6 @@ pub mod primitive;
 pub mod shaping;
 pub mod stack;
 
-/// Basic types used across the layouting engine.
-pub mod prelude {
-    pub use super::primitive::*;
-    pub use super::Layout;
-    pub use Dir::*;
-    pub use GenAlign::*;
-    pub use GenAxis::*;
-    pub use SpecAlign::*;
-    pub use SpecAxis::*;
-}
-
 pub use primitive::*;
 
 use std::ops::Deref;
@@ -52,7 +41,7 @@ pub async fn layout(
     let mut stack = StackLayouter::new(areas, StackOptions { dir: Dir::TTB });
 
     for node in tree {
-        let item = match &node.v {
+        match &node.v {
             SyntaxNode::Text(text) => {
                 let layout = shape(text, ShapeOptions {
                     loader: &mut loader,
@@ -60,12 +49,12 @@ pub async fn layout(
                     dir: Dir::LTR,
                 })
                 .await;
-                LayoutItem::Layout(GenAlign::Start, layout)
-            }
-            _ => continue,
-        };
 
-        stack.layout_item(item);
+                stack.layout_movable(GenAlign::Start, layout)
+            }
+
+            _ => {}
+        }
     }
 
     Pass::ok(stack.finish())
@@ -125,9 +114,10 @@ impl Layout {
 }
 
 pub trait Layouter {
-    fn areas(&self) -> (Option<&Area>, &Areas);
-    fn layout_item(&mut self, item: LayoutItem);
-    fn layout_placed(&mut self, pos: Point, placement: Placement, layout: Layout);
+    fn remaining(&self) -> (Option<&Area>, &Areas);
+    fn spacing(&mut self, axis: SpecAxis, amount: f64);
+    fn layout_movable(&mut self, align: GenAlign, layout: Layout);
+    fn layout_immovable(&mut self, pos: Point, collider: Collider, layout: Layout);
 }
 
 #[derive(Debug, Clone)]
@@ -218,12 +208,6 @@ impl Deref for Areas {
     fn deref(&self) -> &Self::Target {
         &self.vec
     }
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum Placement {
-    InFlow,
-    OutOfFlow(Collider),
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]

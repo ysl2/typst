@@ -6,8 +6,8 @@ use crate::geom::TranslateScale;
 
 pub struct StackLayouter {
     opts: StackOptions,
-    areas: Areas,
     curr: Option<Current>,
+    areas: Areas,
     done: Vec<Layout>,
 }
 
@@ -23,8 +23,12 @@ pub struct StackOptions {
 
 impl StackLayouter {
     pub fn new(mut areas: Areas, opts: StackOptions) -> Self {
-        let curr = areas.next().map(Current::new);
-        Self { opts, areas, curr, done: vec![] }
+        Self {
+            opts,
+            curr: areas.next().map(Current::new),
+            areas,
+            done: vec![],
+        }
     }
 
     pub fn finish(mut self) -> Vec<Layout> {
@@ -34,41 +38,31 @@ impl StackLayouter {
 }
 
 impl Layouter for StackLayouter {
-    fn areas(&self) -> (Option<&Area>, &Areas) {
+    fn remaining(&self) -> (Option<&Area>, &Areas) {
         (self.curr.as_ref().map(|c| &c.area), &self.areas)
     }
 
-    fn layout_item(&mut self, item: LayoutItem) {
-        match item {
-            LayoutItem::Space => {}
-            LayoutItem::Parbreak => {}
-            LayoutItem::Layout(align, layout) => {
-                if let Some((id, pos)) = self.place(layout.dim, align) {
-                    self.skip_to_area(id);
-                    self.layout_placed(pos, Placement::InFlow, layout);
-                } else {
-                    println!("warn: failed to fit object into area");
-                }
-            }
-            LayoutItem::Spacing(axis, amount) => {
-                if axis == self.opts.dir.axis() {
-                    let curr = try_or!(self.curr.as_mut(), return);
-                    curr.shrink_by_amount(self.opts.dir, amount);
-                }
-            }
+    fn spacing(&mut self, axis: SpecAxis, amount: f64) {
+        if axis == self.opts.dir.axis() {
+            let curr = try_or!(self.curr.as_mut(), return);
+            curr.shrink_by_amount(self.opts.dir, amount);
         }
     }
 
-    fn layout_placed(&mut self, pos: Point, placement: Placement, layout: Layout) {
-        let curr = try_or!(self.curr.as_mut(), return);
-
-        match placement {
-            Placement::InFlow => curr.shrink_by_placed(self.opts.dir, pos, layout.dim),
-            Placement::OutOfFlow(collider) => {
-                curr.shrink_by_collider(pos, &layout, collider);
-            }
+    fn layout_movable(&mut self, align: GenAlign, layout: Layout) {
+        if let Some((id, pos)) = self.place(layout.dim, align) {
+            self.skip_to_area(id);
+            let curr = try_or!(self.curr.as_mut(), return);
+            curr.shrink_by_placed(self.opts.dir, pos, layout.dim);
+            curr.layout.push_layout(pos, layout);
+        } else {
+            println!("warn: failed to fit object into any area");
         }
+    }
 
+    fn layout_immovable(&mut self, pos: Point, collider: Collider, layout: Layout) {
+        let curr = try_or!(self.curr.as_mut(), return);
+        curr.shrink_by_collider(pos, collider, &layout);
         curr.layout.push_layout(pos, layout);
     }
 }
@@ -125,7 +119,7 @@ impl Current {
         self.area.shrink_to(to, dir.start());
     }
 
-    fn shrink_by_collider(&mut self, pos: Point, layout: &Layout, collider: Collider) {
+    fn shrink_by_collider(&mut self, pos: Point, collider: Collider, layout: &Layout) {
         // Tolerance is ignored for rectangles.
         const RECT_EPS: f64 = f64::INFINITY;
 
