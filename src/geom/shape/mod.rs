@@ -73,11 +73,10 @@ impl ApproxEq for PathSeg {
     /// coincide, because two different sets of control points can induce the
     /// same curve.
     fn approx_eq(&self, other: &Self, tolerance: f64) -> bool {
-        use PathSeg::*;
         match (self, other) {
-            (Line(a), Line(b)) => a.approx_eq(&b, tolerance),
-            (Quad(a), Quad(b)) => a.approx_eq(&b, tolerance),
-            (Cubic(a), Cubic(b)) => a.approx_eq(&b, tolerance),
+            (Self::Line(a), Self::Line(b)) => a.approx_eq(&b, tolerance),
+            (Self::Quad(a), Self::Quad(b)) => a.approx_eq(&b, tolerance),
+            (Self::Cubic(a), Self::Cubic(b)) => a.approx_eq(&b, tolerance),
             (a, b) => a.to_cubic().approx_eq(&b.to_cubic(), tolerance),
         }
     }

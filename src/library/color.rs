@@ -2,7 +2,7 @@ use super::*;
 use crate::color::RgbaColor;
 
 /// `rgb`: Create an RGB(A) color.
-pub fn rgb(span: Span, mut args: TableExpr, ctx: &mut EvalCtx) -> Value {
+pub fn rgb(span: Span, mut args: DictExpr, ctx: &mut EvalCtx) -> Value {
     let r = args.expect::<Spanned<f64>>("red value", span, &mut ctx.f);
     let g = args.expect::<Spanned<f64>>("green value", span, &mut ctx.f);
     let b = args.expect::<Spanned<f64>>("blue value", span, &mut ctx.f);

@@ -13,12 +13,17 @@ use crate::length::ScaleLength;
 /// - `style`: `normal`, `italic` or `oblique`.
 /// - `weight`: `100` - `900` or a name like `thin`.
 /// - `width`: `1` - `9` or a name like `condensed`.
-/// - Any other keyword argument whose value is a table of strings is a class
-///   fallback definition like:
+/// - Any other keyword argument whose value is a dictionary of strings defines
+///   a fallback class, for example:
 ///   ```typst
-///   serif = ("Source Serif Pro", "Noto Serif")
+///   [font: serif = ("Source Serif Pro", "Noto Serif")]
 ///   ```
-pub fn font(_: Span, mut args: TableExpr, ctx: &mut EvalCtx) -> Value {
+///   This class can be used in the fallback list or other fallback classes as long
+///   as the resulting fallback tree is acylic.
+///   ```typst
+///   [font: "My Serif", serif]
+///   ```
+pub fn font(_: Span, mut args: DictExpr, ctx: &mut EvalCtx) -> Value {
     let body = args
         .take::<SyntaxTree>()
         .map(|tree| (tree, Rc::clone(&ctx.state.text)));
@@ -46,8 +51,8 @@ pub fn font(_: Span, mut args: TableExpr, ctx: &mut EvalCtx) -> Value {
         needs_flattening = true;
     }
 
-    for (class, mut table) in args.take_all_str::<TableExpr>() {
-        let fallback = table
+    for (class, mut dict) in args.take_all_str::<DictExpr>() {
+        let fallback = dict
             .take_all_num_vals::<StringLike>()
             .map(|s| s.to_lowercase())
             .collect();

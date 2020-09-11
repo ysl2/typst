@@ -21,6 +21,6 @@ pub enum Deco {
     Resolved,
     /// An invalid, unresolved name.
     Unresolved,
-    /// The key part of a key-value entry in a table.
-    TableKey,
+    /// The key part of a key-value entry in a dictionary (or function call).
+    DictKey,
 }

@@ -7,7 +7,7 @@ use fontdock::{FontStyle, FontWeight, FontWidth};
 
 use super::span::{Span, SpanVec, Spanned};
 use crate::color::RgbaColor;
-use crate::eval::table::{SpannedEntry, Table};
+use crate::eval::dict::{Dict, SpannedEntry};
 use crate::layout::{Dir, SpecAlign};
 use crate::length::{Length, ScaleLength};
 use crate::paper::Paper;
@@ -86,7 +86,7 @@ pub struct Call {
     /// If the function had a body, the last argument is of type `Expr::Tree`, if a
     /// function was chained after this one it is resolved as an argument of type
     /// `Expr::Call`.
-    pub args: TableExpr,
+    pub args: DictExpr,
 }
 
 /// An identifier as defined by unicode with a few extra permissible characters.
@@ -130,8 +130,8 @@ pub enum Expr {
     Length(Length),
     /// A color value with alpha channel: `#f79143ff`.
     Color(RgbaColor),
-    /// A table expression: `(false, 12cm, greeting="hi")`.
-    Table(TableExpr),
+    /// A dictionary expression: `(false, 12cm, greeting="hi")`.
+    Dict(DictExpr),
     /// A syntax tree containing typesetting content.
     Tree(SyntaxTree),
     /// A function call: `cmyk(37.7, 0, 3.9, 1.1)`.
@@ -152,57 +152,55 @@ impl Expr {
     /// A natural-language name of the type of this expression, e.g.
     /// "identifier".
     pub fn name(&self) -> &'static str {
-        use Expr::*;
         match self {
-            Ident(_) => "identifier",
-            Str(_) => "string",
-            Bool(_) => "bool",
-            Number(_) => "number",
-            Length(_) => "length",
-            Color(_) => "color",
-            Table(_) => "table",
-            Tree(_) => "syntax tree",
-            Call(_) => "function call",
-            Neg(_) => "negation",
-            Add(_, _) => "addition",
-            Sub(_, _) => "subtraction",
-            Mul(_, _) => "multiplication",
-            Div(_, _) => "division",
+            Self::Ident(_) => "identifier",
+            Self::Str(_) => "string",
+            Self::Bool(_) => "bool",
+            Self::Number(_) => "number",
+            Self::Length(_) => "length",
+            Self::Color(_) => "color",
+            Self::Dict(_) => "dict",
+            Self::Tree(_) => "syntax tree",
+            Self::Call(_) => "function call",
+            Self::Neg(_) => "negation",
+            Self::Add(_, _) => "addition",
+            Self::Sub(_, _) => "subtraction",
+            Self::Mul(_, _) => "multiplication",
+            Self::Div(_, _) => "division",
         }
     }
 }
 
 impl Debug for Expr {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        use Expr::*;
         match self {
-            Ident(i) => i.fmt(f),
-            Str(s) => s.fmt(f),
-            Bool(b) => b.fmt(f),
-            Number(n) => n.fmt(f),
-            Length(s) => s.fmt(f),
-            Color(c) => c.fmt(f),
-            Table(t) => t.fmt(f),
-            Tree(t) => t.fmt(f),
-            Call(c) => c.fmt(f),
-            Neg(e) => write!(f, "-{:?}", e),
-            Add(a, b) => write!(f, "({:?} + {:?})", a, b),
-            Sub(a, b) => write!(f, "({:?} - {:?})", a, b),
-            Mul(a, b) => write!(f, "({:?} * {:?})", a, b),
-            Div(a, b) => write!(f, "({:?} / {:?})", a, b),
+            Self::Ident(i) => i.fmt(f),
+            Self::Str(s) => s.fmt(f),
+            Self::Bool(b) => b.fmt(f),
+            Self::Number(n) => n.fmt(f),
+            Self::Length(s) => s.fmt(f),
+            Self::Color(c) => c.fmt(f),
+            Self::Dict(t) => t.fmt(f),
+            Self::Tree(t) => t.fmt(f),
+            Self::Call(c) => c.fmt(f),
+            Self::Neg(e) => write!(f, "-{:?}", e),
+            Self::Add(a, b) => write!(f, "({:?} + {:?})", a, b),
+            Self::Sub(a, b) => write!(f, "({:?} - {:?})", a, b),
+            Self::Mul(a, b) => write!(f, "({:?} * {:?})", a, b),
+            Self::Div(a, b) => write!(f, "({:?} / {:?})", a, b),
         }
     }
 }
 
-/// A table of expressions.
+/// A dictionary of expressions.
 ///
 /// # Example
 /// ```typst
 /// (false, 12cm, greeting="hi")
 /// ```
-pub type TableExpr = Table<SpannedEntry<Expr>>;
+pub type DictExpr = Dict<SpannedEntry<Expr>>;
 
-impl TableExpr {
+impl DictExpr {
     /// Retrieve and remove the matching value with the lowest number key,
     /// skipping and ignoring all non-matching entries with lower keys.
     pub fn take<T: TryFromExpr>(&mut self) -> Option<T> {
@@ -389,7 +387,7 @@ impl_match!(bool, "bool", &Expr::Bool(b) => b);
 impl_match!(f64, "number", &Expr::Number(n) => n);
 impl_match!(Length, "length", &Expr::Length(l) => l);
 impl_match!(SyntaxTree, "tree", Expr::Tree(t) => t.clone());
-impl_match!(TableExpr, "table", Expr::Table(t) => t.clone());
+impl_match!(DictExpr, "dict", Expr::Dict(t) => t.clone());
 impl_match!(ScaleLength, "number or length",
     &Expr::Length(length) => ScaleLength::Absolute(length),
     &Expr::Number(scale) => ScaleLength::Scaled(scale),
@@ -520,60 +518,60 @@ mod tests {
     }
 
     #[test]
-    fn test_table_take_removes_correct_entry() {
-        let mut table = Table::new();
-        table.insert(1, entry(Expr::Bool(false)));
-        table.insert(2, entry(Expr::Str("hi".to_string())));
-        assert_eq!(table.take::<String>(), Some("hi".to_string()));
-        assert_eq!(table.len(), 1);
-        assert_eq!(table.take::<bool>(), Some(false));
-        assert!(table.is_empty());
+    fn test_dict_take_removes_correct_entry() {
+        let mut dict = Dict::new();
+        dict.insert(1, entry(Expr::Bool(false)));
+        dict.insert(2, entry(Expr::Str("hi".to_string())));
+        assert_eq!(dict.take::<String>(), Some("hi".to_string()));
+        assert_eq!(dict.len(), 1);
+        assert_eq!(dict.take::<bool>(), Some(false));
+        assert!(dict.is_empty());
     }
 
     #[test]
-    fn test_table_expect_errors_about_previous_entries() {
+    fn test_dict_expect_errors_about_previous_entries() {
         let mut f = Feedback::new();
-        let mut table = Table::new();
-        table.insert(1, entry(Expr::Bool(false)));
-        table.insert(3, entry(Expr::Str("hi".to_string())));
-        table.insert(5, entry(Expr::Bool(true)));
+        let mut dict = Dict::new();
+        dict.insert(1, entry(Expr::Bool(false)));
+        dict.insert(3, entry(Expr::Str("hi".to_string())));
+        dict.insert(5, entry(Expr::Bool(true)));
         assert_eq!(
-            table.expect::<String>("", Span::ZERO, &mut f),
+            dict.expect::<String>("", Span::ZERO, &mut f),
             Some("hi".to_string())
         );
         assert_eq!(f.diagnostics, [error!(
             Span::ZERO,
             "expected string, found bool"
         )]);
-        assert_eq!(table.len(), 1);
+        assert_eq!(dict.len(), 1);
     }
 
     #[test]
-    fn test_table_take_with_key_removes_the_entry() {
+    fn test_dict_take_with_key_removes_the_entry() {
         let mut f = Feedback::new();
-        let mut table = Table::new();
-        table.insert(1, entry(Expr::Bool(false)));
-        table.insert("hi", entry(Expr::Bool(true)));
-        assert_eq!(table.take::<bool>(), Some(false));
-        assert_eq!(table.take_key::<f64>("hi", &mut f), None);
+        let mut dict = Dict::new();
+        dict.insert(1, entry(Expr::Bool(false)));
+        dict.insert("hi", entry(Expr::Bool(true)));
+        assert_eq!(dict.take::<bool>(), Some(false));
+        assert_eq!(dict.take_key::<f64>("hi", &mut f), None);
         assert_eq!(f.diagnostics, [error!(
             Span::ZERO,
             "expected number, found bool"
         )]);
-        assert!(table.is_empty());
+        assert!(dict.is_empty());
     }
 
     #[test]
-    fn test_table_take_all_removes_the_correct_entries() {
-        let mut table = Table::new();
-        table.insert(1, entry(Expr::Bool(false)));
-        table.insert(3, entry(Expr::Number(0.0)));
-        table.insert(7, entry(Expr::Bool(true)));
-        assert_eq!(table.take_all_num::<bool>().collect::<Vec<_>>(), [
+    fn test_dict_take_all_removes_the_correct_entries() {
+        let mut dict = Dict::new();
+        dict.insert(1, entry(Expr::Bool(false)));
+        dict.insert(3, entry(Expr::Number(0.0)));
+        dict.insert(7, entry(Expr::Bool(true)));
+        assert_eq!(dict.take_all_num::<bool>().collect::<Vec<_>>(), [
             (1, false),
             (7, true)
         ],);
-        assert_eq!(table.len(), 1);
-        assert_eq!(table[3].val.v, Expr::Number(0.0));
+        assert_eq!(dict.len(), 1);
+        assert_eq!(dict[3].val.v, Expr::Number(0.0));
     }
 }

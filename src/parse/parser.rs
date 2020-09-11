@@ -3,7 +3,7 @@ use std::str::FromStr;
 use super::escaping::*;
 use super::*;
 use crate::color::RgbaColor;
-use crate::eval::table::SpannedEntry;
+use crate::eval::dict::SpannedEntry;
 use crate::syntax::*;
 use crate::{Feedback, Pass};
 
@@ -211,13 +211,13 @@ impl Parser<'_> {
         self.skip_ws();
 
         let mut args = match self.eatv() {
-            Some(Token::Colon) => self.parse_table_contents().0,
+            Some(Token::Colon) => self.parse_dict_contents().0,
             Some(_) => {
                 self.expected_at("colon", name.span.end);
                 while self.eat().is_some() {}
-                TableExpr::new()
+                DictExpr::new()
             }
-            None => TableExpr::new(),
+            None => DictExpr::new(),
         };
 
         self.end_group();
@@ -255,17 +255,17 @@ impl Parser<'_> {
 
     fn parse_paren_call(&mut self, name: Spanned<Ident>) -> Spanned<Call> {
         self.start_group(Group::Paren);
-        let args = self.parse_table_contents().0;
+        let args = self.parse_dict_contents().0;
         let args_span = self.end_group();
         let span = Span::merge(name.span, args_span);
         Spanned::new(Call { name, args }, span)
     }
 }
 
-// Tables.
+// Dictionaries.
 impl Parser<'_> {
-    fn parse_table_contents(&mut self) -> (TableExpr, bool) {
-        let mut table = TableExpr::new();
+    fn parse_dict_contents(&mut self) -> (DictExpr, bool) {
+        let mut dict = DictExpr::new();
         let mut comma_and_keyless = true;
 
         while {
@@ -304,10 +304,10 @@ impl Parser<'_> {
             let behind = val.span.end;
             if let Some(key) = key {
                 comma_and_keyless = false;
-                table.insert(key.v.0, SpannedEntry::new(key.span, val));
-                self.feedback.decos.push(Spanned::new(Deco::TableKey, key.span));
+                dict.insert(key.v.0, SpannedEntry::new(key.span, val));
+                self.feedback.decos.push(Spanned::new(Deco::DictKey, key.span));
             } else {
-                table.push(SpannedEntry::val(val));
+                dict.push(SpannedEntry::val(val));
             }
 
             if {
@@ -321,8 +321,8 @@ impl Parser<'_> {
             comma_and_keyless = false;
         }
 
-        let coercable = comma_and_keyless && !table.is_empty();
-        (table, coercable)
+        let coercable = comma_and_keyless && !dict.is_empty();
+        (dict, coercable)
     }
 }
 
@@ -431,18 +431,18 @@ impl Parser<'_> {
                 }
             }
 
-            // This could be a table or a parenthesized expression. We parse as
-            // a table in any case and coerce the table into a value if it is
-            // coercable (length 1 and no trailing comma).
+            // This could be a dictionary or a parenthesized expression. We parse as
+            // a dictionary in any case and coerce the dictionary into a value if that's
+            // possible (length 1 and no trailing comma).
             Token::LeftParen => {
                 self.start_group(Group::Paren);
-                let (table, coercable) = self.parse_table_contents();
+                let (dict, coercable) = self.parse_dict_contents();
                 let span = self.end_group();
 
                 let expr = if coercable {
-                    table.into_values().next().expect("table is coercable").val.v
+                    dict.into_values().next().expect("dict is coercable").val.v
                 } else {
-                    Expr::Table(table)
+                    Expr::Dict(dict)
                 };
 
                 Spanned::new(expr, span)

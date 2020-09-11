@@ -12,7 +12,7 @@
 //!
 //! [evaluation context]: ./struct.EvalCtx.html
 
-pub mod table;
+pub mod dict;
 
 mod scope;
 pub mod value;
@@ -25,11 +25,11 @@ use std::rc::Rc;
 use crate::dom::{DomNode, DomTree, PageStyle, TextStyle};
 use crate::layout::primitive::LayoutSystem;
 use crate::syntax::{
-    Call, Deco, Expr, Heading, Spanned, SyntaxNode, SyntaxTree, TableExpr,
+    Call, Deco, DictExpr, Expr, Heading, Spanned, SyntaxNode, SyntaxTree,
 };
 use crate::{Feedback, Pass};
 
-use table::SpannedEntry;
+use dict::SpannedEntry;
 
 /// Evaluate a syntax tree into a stateless DOM tree.
 ///
@@ -162,7 +162,7 @@ impl Eval for Call {
                 error!(@ctx.f, span, "unknown function");
                 ctx.f.decos.push(Spanned::new(Deco::Unresolved, span));
             }
-            Value::Table(self.args.eval(ctx))
+            Value::Dict(self.args.eval(ctx))
         }
     }
 }
@@ -178,7 +178,7 @@ impl Eval for Expr {
             Self::Number(n) => Value::Number(n),
             Self::Length(s) => Value::Length(s),
             Self::Color(c) => Value::Color(c),
-            Self::Table(t) => Value::Table(t.eval(ctx)),
+            Self::Dict(t) => Value::Dict(t.eval(ctx)),
             Self::Tree(t) => Value::Tree(t.eval(ctx)),
             Self::Call(call) => call.eval(ctx),
             Self::Neg(_) => todo!("eval neg"),
@@ -190,19 +190,19 @@ impl Eval for Expr {
     }
 }
 
-impl Eval for TableExpr {
-    type Output = TableValue;
+impl Eval for DictExpr {
+    type Output = DictValue;
 
     fn eval(self, ctx: &mut EvalCtx) -> Self::Output {
-        let mut table = TableValue::new();
+        let mut dict = DictValue::new();
 
         for (key, entry) in self.into_iter() {
             let val = entry.val.v.eval(ctx);
             let spanned = Spanned::new(val, entry.val.span);
             let entry = SpannedEntry::new(entry.key, spanned);
-            table.insert(key, entry);
+            dict.insert(key, entry);
         }
 
-        table
+        dict
     }
 }
