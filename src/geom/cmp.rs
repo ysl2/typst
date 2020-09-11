@@ -95,18 +95,15 @@ macro_rules! impl_approx_eq {
 /// # Examples
 /// These comparisons work out fine:
 /// ```
-/// # use typstc::assert_approx_eq;
 /// assert_approx_eq!(1.0, 1.00000001);
 /// assert_approx_eq!(1.0, 1.2, tolerance = 0.3);
 /// ```
 ///
 /// Whereas this one will panic:
 /// ```should_panic
-/// # use typstc::assert_approx_eq;
-/// # let boom = "";
 /// assert_approx_eq!(1.0, 1.2, "a problem has been detected: {}", boom);
 /// ```
-#[macro_export]
+#[allow(unused)]
 macro_rules! assert_approx_eq {
     ($left:expr, $right:expr, tolerance = $t:expr $(,)?) => {{
         let (left, right) = (&$left, &$right);

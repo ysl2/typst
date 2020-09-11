@@ -49,7 +49,7 @@ std! {
 }
 */
 
-use crate::exec::Scope;
+use crate::eval::Scope;
 
 /// Create a scope with all standard library functions.
 pub fn _std() -> Scope {

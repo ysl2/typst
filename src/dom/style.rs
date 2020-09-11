@@ -1,4 +1,4 @@
-//! Styles for text and pages.
+//! Style of text and pages.
 
 use std::rc::Rc;
 
@@ -7,15 +7,6 @@ use fontdock::{fallback, FallbackTree, FontStyle, FontVariant, FontWeight, FontW
 use crate::geom::{Insets, Size};
 use crate::length::{Length, ScaleLength};
 use crate::paper::{Paper, PaperClass, PAPER_A4};
-
-/// Defines properties of pages and text.
-#[derive(Debug, Default, Clone, PartialEq)]
-pub struct Style {
-    /// The style for text.
-    pub text: Rc<TextStyle>,
-    /// The style for pages.
-    pub page: Rc<PageStyle>,
-}
 
 /// Defines which fonts to use and how to space text.
 #[derive(Debug, Clone, PartialEq)]
@@ -31,21 +22,23 @@ pub struct TextStyle {
     /// whether the next `_` makes italic or non-italic.
     pub italic: bool,
     /// The base font size.
-    pub base_font_size: f64,
+    pub font_size: f64,
     /// The font scale to apply on the base font size.
     pub font_scale: f64,
-    /// The word spacing (as a multiple of the font size).
+    /// The word spacing (as a multiple of the scaled font size).
     pub word_spacing_scale: f64,
-    /// The line spacing (as a multiple of the font size).
-    pub line_spacing_scale: f64,
-    /// The paragraphs spacing (as a multiple of the font size).
-    pub paragraph_spacing_scale: f64,
+    /// The line height (as a multiple of the scaled font size).
+    pub line_height_scale: f64,
+    /// The line padding (as a multiple of the scaled font size).
+    pub line_padding_scale: f64,
+    /// The paragraphs spacing (as a multiple of the scaled font size).
+    pub par_spacing_scale: f64,
 }
 
 impl TextStyle {
     /// The scaled font size.
     pub fn font_size(&self) -> f64 {
-        self.base_font_size * self.font_scale
+        self.font_size * self.font_scale
     }
 
     /// The absolute word spacing.
@@ -53,14 +46,19 @@ impl TextStyle {
         self.word_spacing_scale * self.font_size()
     }
 
-    /// The absolute line spacing.
-    pub fn line_spacing(&self) -> f64 {
-        (self.line_spacing_scale - 1.0) * self.font_size()
+    /// The absolute line height.
+    pub fn line_height(&self) -> f64 {
+        self.line_height_scale * self.font_size()
+    }
+
+    /// The absolute line padding.
+    pub fn line_padding(&self) -> f64 {
+        self.line_padding_scale * self.font_size()
     }
 
     /// The absolute paragraph spacing.
-    pub fn paragraph_spacing(&self) -> f64 {
-        (self.paragraph_spacing_scale - 1.0) * self.font_size()
+    pub fn par_spacing(&self) -> f64 {
+        self.par_spacing_scale * self.font_size()
     }
 }
 
@@ -87,11 +85,12 @@ impl Default for TextStyle {
             },
             bolder: false,
             italic: false,
-            base_font_size: Length::pt(11.0).as_raw(),
+            font_size: Length::pt(11.0).as_raw(),
             font_scale: 1.0,
             word_spacing_scale: 0.25,
-            line_spacing_scale: 1.2,
-            paragraph_spacing_scale: 1.5,
+            line_height_scale: 1.2,
+            line_padding_scale: 0.2,
+            par_spacing_scale: 0.5,
         }
     }
 }

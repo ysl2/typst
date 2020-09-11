@@ -5,8 +5,14 @@ use std::fmt::{self, Display, Formatter};
 /// Specifies the directions into which content is laid out.
 ///
 /// The primary component defines into which direction text and lines flow and the
-/// secondary into which paragraphs grow.
+/// secondary into which paragraphs and pages grow.
 pub type LayoutSystem = Gen2<Dir>;
+
+impl Default for LayoutSystem {
+    fn default() -> Self {
+        Self::new(Dir::LTR, Dir::TTB)
+    }
+}
 
 /// A generic container with two components for the two generic axes.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]

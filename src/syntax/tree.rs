@@ -4,11 +4,11 @@ use std::fmt::{self, Debug, Formatter};
 
 use super::span::{SpanVec, Spanned};
 use crate::color::RgbaColor;
-use crate::exec::table::{SpannedEntry, Table};
+use crate::eval::table::{SpannedEntry, Table};
 use crate::length::Length;
 use crate::parse::is_ident;
 
-/// A collection of nodes which form a tree together with the nodes' children.
+/// A collection of syntax nodes which form a tree together with the their children.
 pub type SyntaxTree = SpanVec<SyntaxNode>;
 
 /// A syntax node, which encompasses a single logical entity of parsed source
@@ -28,7 +28,7 @@ pub enum SyntaxNode {
     /// Plain text.
     Text(String),
     /// Section headings.
-    Heading(Heading),
+    Heading(Heading<SyntaxTree>),
     /// Lines of raw text.
     Raw(Raw),
     /// An optionally highlighted (multi-line) code block.
@@ -39,30 +39,47 @@ pub enum SyntaxNode {
 
 /// A section heading.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Heading {
-    /// The section depth (how many hashtags minus 1).
+pub struct Heading<T> {
+    /// The section depth from `0` to `5`
+    /// (corresponds to the number of hashtags minus `1`).
     pub level: Spanned<u8>,
-    pub tree: SyntaxTree,
+    /// The contents of the heading.
+    pub contents: T,
 }
 
 /// Raw text.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Raw {
+    /// The lines of raw text (raw text is split at newlines by the parser).
     pub lines: Vec<String>,
 }
 
 /// A code block.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Code {
+    /// The language to highlight the code in if present. If this is `None`, no syntax
+    /// highlighting should be applied.
     pub lang: Option<Spanned<Ident>>,
+    /// The lines of raw text (code is split at newlines by the parser).
     pub lines: Vec<String>,
+    /// Whether this code element is "block"-level.
+    ///
+    /// - If true, this should be separated into its own paragraph
+    ///   independently of its surroundings.
+    /// - If false, this element can be set inline.
     pub block: bool,
 }
 
 /// An invocation of a function.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Call {
+    /// The name of the invoked function.
     pub name: Spanned<Ident>,
+    /// The arguments passed to the function.
+    ///
+    /// If the function had a body, the last argument is of type `Expr::Tree`, if a
+    /// function was chained after this one it is resolved as an argument of type
+    /// `Expr::Call`.
     pub args: TableExpr,
 }
 

@@ -21,7 +21,8 @@ serde = { version = "1", features = ["derive"], optional = true }
 smallvec = "1"
 
 [features]
-serialize = []
+default = ["fs", "serialize"]
+serialize = ["serde"]
 fs = ["fontdock/fs"]
 
 [dev-dependencies]

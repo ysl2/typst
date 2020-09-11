@@ -3,7 +3,7 @@ use std::str::FromStr;
 use super::escaping::*;
 use super::*;
 use crate::color::RgbaColor;
-use crate::exec::table::SpannedEntry;
+use crate::eval::table::SpannedEntry;
 use crate::syntax::*;
 use crate::{Feedback, Pass};
 
@@ -157,7 +157,7 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_heading(&mut self) -> Spanned<Heading> {
+    fn parse_heading(&mut self) -> Spanned<Heading<SyntaxTree>> {
         let start = self.pos();
         self.assert(Token::Hashtag);
 
@@ -179,15 +179,15 @@ impl Parser<'_> {
 
         self.skip_ws();
 
-        let mut tree = SyntaxTree::new();
+        let mut contents = SyntaxTree::new();
         while !self.eof() && !matches!(self.peekv(), Some(Token::Space(n)) if n >= 1) {
             if let Some(node) = self.parse_node() {
-                tree.push(node);
+                contents.push(node);
             }
         }
 
         let span = Span::new(start, self.pos());
-        Spanned::new(Heading { level, tree }, span)
+        Spanned::new(Heading { level, contents }, span)
     }
 }
 

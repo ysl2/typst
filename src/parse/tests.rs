@@ -2,7 +2,7 @@
 
 use super::parse;
 use crate::color::RgbaColor;
-use crate::exec::table::SpannedEntry;
+use crate::eval::table::SpannedEntry;
 use crate::length::Length;
 use crate::parse::check::*;
 use crate::syntax::*;
@@ -22,7 +22,7 @@ macro_rules! H {
     ($level:expr, $($tts:tt)*) => {
         SyntaxNode::Heading(Heading {
             level: Spanned::zero($level),
-            tree: Tree![@$($tts)*],
+            contents: Tree![@$($tts)*],
         })
     };
 }

@@ -5,7 +5,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use fontdock::fs::{FsIndex, FsProvider};
 use futures_executor::block_on;
 
-use typstc::dom::Style;
+use typstc::eval::State;
 use typstc::font::FontLoader;
 use typstc::parse::parse;
 use typstc::typeset;
@@ -30,13 +30,13 @@ fn typesetting_benchmark(c: &mut Criterion) {
     let provider = FsProvider::new(files);
     let loader = FontLoader::new(Box::new(provider), descriptors);
     let loader = Rc::new(RefCell::new(loader));
-    let style = Rc::new(Style::default());
+    let state = State::default();
     let funcs = typstc::library::_std();
     let typeset = |src| {
         block_on(typeset(
             src,
             Rc::clone(&loader),
-            Rc::clone(&style),
+            state.clone(),
             funcs.clone(),
         ))
     };

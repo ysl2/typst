@@ -23,7 +23,7 @@ use stack::{StackLayouter, StackOptions};
 pub async fn layout(tree: &DomTree, loader: SharedFontLoader) -> Pass<Vec<Layout>> {
     let mut loader = loader.borrow_mut();
 
-    // let page = &state.style.page;
+    // FIXME: Don't assume page style.
     let page = crate::dom::PageStyle::default();
     let margins = page.margins();
     let area = Area {
@@ -36,11 +36,11 @@ pub async fn layout(tree: &DomTree, loader: SharedFontLoader) -> Pass<Vec<Layout
     let mut stack = StackLayouter::new(areas, StackOptions { dir: Dir::TTB });
 
     for node in tree {
-        match &node.v.node {
-            DomNode::Text(text) => {
+        match &node.v {
+            DomNode::Text { text, style } => {
                 let layout = shape(text, ShapeOptions {
                     loader: &mut loader,
-                    style: &node.v.style.text,
+                    style: &style,
                     dir: Dir::LTR,
                 })
                 .await;
@@ -87,6 +87,8 @@ impl Layout {
         }
     }
 }
+
+pub trait Layoutable {}
 
 pub trait Layouter {
     fn remaining(&self) -> (Option<&Area>, &Areas);

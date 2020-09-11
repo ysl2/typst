@@ -12,7 +12,7 @@ use crate::syntax::SpanVec;
 /// A list of spanned diagnostics.
 pub type Diagnostics = SpanVec<Diagnostic>;
 
-/// A diagnostic that arose in parsing or layouting.
+/// A diagnostic that arose in compilation.
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 #[cfg_attr(feature = "serialize", derive(Serialize))]
 pub struct Diagnostic {
