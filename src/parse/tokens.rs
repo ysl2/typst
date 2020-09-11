@@ -259,15 +259,20 @@ impl<'s> Tokens<'s> {
 
             let start = self.index();
             let mut backticks = 0u32;
+            let mut escaped = false;
 
+            // Find totally unescaped sequence of three backticks.
             while backticks < 3 {
                 match self.eat() {
-                    Some('`') => backticks += 1,
-                    // Escaping of triple backticks.
-                    Some('\\') if backticks == 1 && self.peek() == Some('`') => {
+                    Some('`') if !escaped => backticks += 1,
+                    Some('\\') => {
                         backticks = 0;
+                        escaped = !escaped;
                     }
-                    Some(_) => {}
+                    Some(_) => {
+                        backticks = 0;
+                        escaped = false;
+                    }
                     None => break,
                 }
             }
@@ -544,7 +549,9 @@ mod tests {
         t!(Body, "`\\``"         => Raw("\\`", true));
         t!(Body, "``not code`"   => Raw("", true), T("not"), S(0), T("code"), Raw("", false));
         t!(Body, "```rust hi```" => Code(Lang("rust"), "hi", true));
-        t!(Body, "``` hi`\\``"   => Code(None, "hi`\\``", false));
+        t!(Body, r"``` hi`\``"   => Code(None, r"hi`\``", false));
+        t!(Body, r"``` hi\````"  => Code(None, r"hi\`", true));
+        t!(Body, "``` not `y`e`t finished```" => Code(None, "not `y`e`t finished", true));
         t!(Body, "```js   \r\n  document.write(\"go\")" => Code(Lang("js"), "  document.write(\"go\")", false));
         t!(Header, "_`"          => Invalid("_`"));
     }

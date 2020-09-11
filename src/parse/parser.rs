@@ -122,7 +122,7 @@ impl Parser<'_> {
                     }
                 });
 
-                let mut lines = unescape_code(raw);
+                let mut lines = unescape_raw(raw);
                 let block = lines.len() > 1;
 
                 if lines.last().map(|s| s.is_empty()).unwrap_or(false) {
