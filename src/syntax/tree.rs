@@ -35,10 +35,8 @@ pub enum SyntaxNode {
     Text(String),
     /// Section headings.
     Heading(Heading<SyntaxTree>),
-    /// Lines of raw text.
+    /// An optionally syntax-highlighted block of raw text or code.
     Raw(Raw),
-    /// An optionally highlighted (multi-line) code block.
-    Code(Code),
     /// A function call.
     Call(Call),
 }
@@ -53,22 +51,14 @@ pub struct Heading<T> {
     pub contents: T,
 }
 
-/// Raw text.
+/// An optionally syntax-highlighted block of raw text or code.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Raw {
-    /// The lines of raw text (raw text is split at newlines by the parser).
-    pub lines: Vec<String>,
-}
-
-/// A code block.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Code {
-    /// The language to highlight the code in if present. If this is `None`, no syntax
-    /// highlighting should be applied.
+    /// The language to highlight the code in if present.
     pub lang: Option<Spanned<Ident>>,
-    /// The lines of raw text (code is split at newlines by the parser).
+    /// The lines of raw text (the text is split at newlines by the parser).
     pub lines: Vec<String>,
-    /// Whether this code element is "block"-level.
+    /// Whether this element is "block"-level.
     ///
     /// - If true, this should be separated into its own paragraph
     ///   independently of its surroundings.

@@ -28,18 +28,11 @@ macro_rules! H {
 }
 
 macro_rules! R {
-    ($($line:expr),* $(,)?) => {
-        SyntaxNode::Raw(Raw { lines: vec![$($line.to_string()),*] })
-    };
-}
-
-macro_rules! C {
-    ($lang:expr, $($line:expr),* $(,)?) => {{
-        let lines = vec![$($line.to_string()) ,*];
-        SyntaxNode::Code(Code {
+    ($lang:expr, $block:expr, $($line:expr),* $(,)?) => {{
+        SyntaxNode::Raw(Raw {
             lang: $lang,
-            block: lines.len() > 1,
-            lines,
+            block: $block,
+            lines: vec![$($line.to_string()) ,*],
         })
     }};
 }
@@ -183,19 +176,7 @@ fn test_parse_simple_nodes() {
     t!("\\u{1f303}"     => T("🌃"));
     t!("\n\n\nhello"    => P, T("hello"));
     t!(r"a\ b"          => T("a"), L, S, T("b"));
-    t!("`py`"           => R!["py"]);
-    t!("`hi\nyou"       => R!["hi", "you"]);
-    e!("`hi\nyou"       => s(1,3, 1,3, "expected backtick"));
-    t!("`hi\\`du`"      => R!["hi`du"]);
 
-    ts!("```java out```" => s(0,0, 0,14, C![Lang(s(0,3, 0,7, "java")), "out"]));
-    t!("``` console.log(\n\"alert\"\n)" => C![None, "console.log(", "\"alert\"", ")"]);
-    t!("```typst \r\n Typst uses `\\`` to indicate code blocks" => C![
-        Lang("typst"), " Typst uses ``` to indicate code blocks"
-    ]);
-
-    e!("``` hi\nyou"      => s(1,3, 1,3,  "expected backticks"));
-    e!("```🌍 hi\nyou```" => s(0,3, 0,4,  "invalid identifier"));
     e!("\\u{d421c809}"    => s(0,0, 0,12, "invalid unicode escape sequence"));
     e!("\\u{abc"          => s(0,6, 0,6, "expected closing brace"));
     t!("💜\n\n 🌍"       => T("💜"), P, T("🌍"));
@@ -203,6 +184,31 @@ fn test_parse_simple_nodes() {
     ts!("hi"   => s(0,0, 0,2, T("hi")));
     ts!("*Hi*" => s(0,0, 0,1, B), s(0,1, 0,3, T("Hi")), s(0,3, 0,4, B));
     ts!("💜\n\n 🌍" => s(0,0, 0,1, T("💜")), s(0,1, 2,1, P), s(2,1, 2,2, T("🌍")));
+}
+
+#[test]
+fn test_parse_raw() {
+    t!("`py`"            => R![None, false, "py"]);
+    t!("`hi\nyou"        => R![None, false, "hi", "you"]);
+    t!(r"`` hi\`du``"    => R![None, false, r"hi\`du"]);
+
+    // More than one backtick with optional language tag.
+    t!("``` console.log(\n\"alert\"\n)" => R![None, true, "console.log(", "\"alert\"", ")"]);
+    t!("````typst \r\n Typst uses ``` to indicate code blocks````!"
+        => R![Lang("typst"), true, " Typst uses ``` to indicate code blocks"], T("!"));
+    ts!("``java out``" => s(0,0, 0,12, R![Lang(s(0,2, 0,6, "java")), false, "out"]));
+
+    // Trimming of whitespace.
+    t!("`` a ``"         => R![None, false, "a"]);
+    t!("`` a  ``"        => R![None, false, "a "]);
+    t!("`` ` ``"         => R![None, false, "`"]);
+    t!("```  `   ```"    => R![None, false, " `  "]);
+    t!("```  `   \n ```" => R![None, true, " `   "]);
+
+    // Errors.
+    e!("`hi\nyou"         => s(1,3, 1,3, "expected backtick(s)"));
+    e!("``` hi\nyou"      => s(1,3, 1,3,  "expected backtick(s)"));
+    e!("```🌍 hi\nyou```" => s(0,3, 0,4,  "invalid identifier"));
 }
 
 #[test]
@@ -311,7 +317,7 @@ fn test_parse_function_bodies() {
     e!(" [val][ */ ]"   => s(0,8, 0,10, "unexpected end of block comment"));
 
     // Raw in body.
-    t!("[val][`Hi]`" => F!("val"; Tree![R!["Hi]"]]));
+    t!("[val][`Hi]`" => F!("val"; Tree![R![None, false, "Hi]"]]));
     e!("[val][`Hi]`" => s(0,11, 0,11, "expected closing bracket"));
 
     // Crazy.

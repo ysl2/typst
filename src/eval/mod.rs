@@ -122,7 +122,6 @@ impl Eval for SyntaxTree {
                 }
                 SyntaxNode::Heading(heading) => DomNode::Heading(heading.eval(ctx)),
                 SyntaxNode::Raw(raw) => DomNode::Raw(raw),
-                SyntaxNode::Code(code) => DomNode::Code(code),
                 SyntaxNode::Call(call) => {
                     let value = Spanned::new(call.eval(ctx), span);
                     dom.extend(value.flatten_tree());

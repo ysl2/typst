@@ -119,7 +119,7 @@ impl<'s> Iterator for Tokens<'s> {
 
             // Style toggles.
             '_' if self.mode == Body => Underscore,
-            '`' if self.mode == Body => self.read_raw_or_code(),
+            '`' if self.mode == Body => self.read_raw(),
 
             // Sections.
             '#' if self.mode == Body => Hashtag,
@@ -222,71 +222,46 @@ impl<'s> Tokens<'s> {
         Str { string, terminated }
     }
 
-    fn read_raw_or_code(&mut self) -> Token<'s> {
-        let (raw, terminated) = self.read_until_unescaped('`');
-        if raw.is_empty() && terminated && self.peek() == Some('`') {
-            // Third tick found; this is a code block.
+    fn read_raw(&mut self) -> Token<'s> {
+        let mut backticks = 1;
+        while self.peek() == Some('`') {
             self.eat();
+            backticks += 1;
+        }
 
-            // Reads the lang tag (until newline or whitespace).
+        let mut lang = None;
+        if backticks > 1 {
+            // Read the lang tag (until newline or whitespace).
             let start = self.pos();
-            let (lang, _) = self.read_string_until(false, 0, 0, |c| {
+            let (tag, _) = self.read_string_until(false, 0, 0, |c| {
                 c == '`' || c.is_whitespace() || is_newline_char(c)
             });
             let end = self.pos();
 
-            let lang = if !lang.is_empty() {
-                Some(Spanned::new(lang, Span::new(start, end)))
-            } else {
-                None
-            };
-
-            // Skip to start of raw contents.
-            while let Some(c) = self.peek() {
-                if is_newline_char(c) {
-                    self.eat();
-                    if c == '\r' && self.peek() == Some('\n') {
-                        self.eat();
-                    }
-
-                    break;
-                } else if c.is_whitespace() {
-                    self.eat();
-                } else {
-                    break;
-                }
+            if !tag.is_empty() {
+                lang = Some(Spanned::new(tag, Span::new(start, end)));
             }
+        }
 
-            let start = self.index();
-            let mut backticks = 0u32;
-            let mut escaped = false;
+        let start = self.index();
+        let mut found = 0;
 
-            // Find totally unescaped sequence of three backticks.
-            while backticks < 3 {
-                match self.eat() {
-                    Some('`') if !escaped => backticks += 1,
-                    Some('\\') => {
-                        backticks = 0;
-                        escaped = !escaped;
-                    }
-                    Some(_) => {
-                        backticks = 0;
-                        escaped = false;
-                    }
-                    None => break,
-                }
+        while found < backticks {
+            match self.eat() {
+                Some('`') => found += 1,
+                Some(_) => found = 0,
+                None => break,
             }
+        }
 
-            let terminated = backticks == 3;
-            let end = self.index() - if terminated { 3 } else { 0 };
+        let terminated = found == backticks;
+        let end = self.index() - if terminated { found } else { 0 };
 
-            Code {
-                lang,
-                raw: &self.src[start .. end],
-                terminated,
-            }
-        } else {
-            Raw { raw, terminated }
+        Raw {
+            backticks,
+            lang,
+            raw: &self.src[start .. end],
+            terminated,
         }
     }
 
@@ -474,15 +449,13 @@ mod tests {
     fn Str(string: &str, terminated: bool) -> Token {
         Token::Str { string, terminated }
     }
-    fn Raw(raw: &str, terminated: bool) -> Token {
-        Token::Raw { raw, terminated }
-    }
-    fn Code<'a>(
+    fn Raw<'a>(
+        backticks: usize,
         lang: Option<Spanned<&'a str>>,
         raw: &'a str,
         terminated: bool,
     ) -> Token<'a> {
-        Token::Code { lang, raw, terminated }
+        Token::Raw { backticks, lang, raw, terminated }
     }
     fn Lang<'a, T: Into<Spanned<&'a str>>>(lang: T) -> Option<Spanned<&'a str>> {
         Some(Into::<Spanned<&str>>::into(lang))
@@ -502,7 +475,7 @@ mod tests {
     }
 
     #[test]
-    fn tokenize_whitespace() {
+    fn test_tokenize_whitespace() {
         t!(Body, ""             => );
         t!(Body, " "            => S(0));
         t!(Body, "    "         => S(0));
@@ -520,7 +493,7 @@ mod tests {
     }
 
     #[test]
-    fn tokenize_comments() {
+    fn test_tokenize_comments() {
         t!(Body, "a // bc\n "        => T("a"), S(0), LC(" bc"),  S(1));
         t!(Body, "a //a//b\n "       => T("a"), S(0), LC("a//b"), S(1));
         t!(Body, "a //a//b\r\n"      => T("a"), S(0), LC("a//b"), S(1));
@@ -535,29 +508,40 @@ mod tests {
     }
 
     #[test]
-    fn tokenize_body_only_tokens() {
+    fn test_tokenize_body_only_tokens() {
         t!(Body, "_*"            => Underscore, Star);
         t!(Body, "***"           => Star, Star, Star);
         t!(Body, "[func]*bold*"  => L, T("func"), R, Star, T("bold"), Star);
         t!(Body, "hi_you_ there" => T("hi"), Underscore, T("you"), Underscore, S(0), T("there"));
-        t!(Body, "`raw`"         => Raw("raw", true));
         t!(Body, "# hi"          => Hashtag, S(0), T("hi"));
         t!(Body, "#()"           => Hashtag, T("()"));
-        t!(Body, "`[func]`"      => Raw("[func]", true));
-        t!(Body, "`]"            => Raw("]", false));
         t!(Body, "\\ "           => Backslash, S(0));
-        t!(Body, "`\\``"         => Raw("\\`", true));
-        t!(Body, "``not code`"   => Raw("", true), T("not"), S(0), T("code"), Raw("", false));
-        t!(Body, "```rust hi```" => Code(Lang("rust"), "hi", true));
-        t!(Body, r"``` hi`\``"   => Code(None, r"hi`\``", false));
-        t!(Body, r"``` hi\````"  => Code(None, r"hi\`", true));
-        t!(Body, "``` not `y`e`t finished```" => Code(None, "not `y`e`t finished", true));
-        t!(Body, "```js   \r\n  document.write(\"go\")" => Code(Lang("js"), "  document.write(\"go\")", false));
         t!(Header, "_`"          => Invalid("_`"));
     }
 
     #[test]
-    fn tokenize_header_only_tokens() {
+    fn test_tokenize_raw() {
+        // Basics.
+        t!(Body, "`raw`"    => Raw(1, None, "raw", true));
+        t!(Body, "`[func]`" => Raw(1, None, "[func]", true));
+        t!(Body, "`]"       => Raw(1, None, "]", false));
+        t!(Body, r"`\`` "   => Raw(1, None, r"\", true), Raw(1, None, " ", false));
+
+        // Language tag.
+        t!(Body, "``` hi```"     => Raw(3, None, " hi", true));
+        t!(Body, "```rust hi```" => Raw(3, Lang("rust"), " hi", true));
+        t!(Body, r"``` hi\````"  => Raw(3, None, r" hi\", true), Raw(1, None, "", false));
+        t!(Body, "``` not `y`e`t finished```" => Raw(3, None, " not `y`e`t finished", true));
+        t!(Body, "```js   \r\n  document.write(\"go\")`"
+            => Raw(3, Lang("js"), "   \r\n  document.write(\"go\")`", false));
+
+        // More backticks.
+        t!(Body, "`````` ``````hi"  => Raw(6, None, " ", true), T("hi"));
+        t!(Body, "````\n```js\nalert()\n```\n````" => Raw(4, None, "\n```js\nalert()\n```\n", true));
+    }
+
+    #[test]
+    fn test_tokenize_header_only_tokens() {
         t!(Body, "a: b"                => T("a:"), S(0), T("b"));
         t!(Body, "c=d, "               => T("c=d,"), S(0));
         t!(Header, "(){}:=,"           => LP, RP, LB, RB, Colon, Equals, Comma);
@@ -594,7 +578,7 @@ mod tests {
     }
 
     #[test]
-    fn tokenize_strings() {
+    fn test_tokenize_strings() {
         t!(Body, "a \"hi\" string"           => T("a"), S(0), T("\"hi\""), S(0), T("string"));
         t!(Header, "\"hello"                 => Str("hello", false));
         t!(Header, "\"hello world\""         => Str("hello world", true));
@@ -607,7 +591,7 @@ mod tests {
     }
 
     #[test]
-    fn tokenize_escaped_symbols() {
+    fn test_tokenize_escaped_symbols() {
         t!(Body, r"\\"       => T(r"\"));
         t!(Body, r"\["       => T("["));
         t!(Body, r"\]"       => T("]"));
@@ -621,7 +605,7 @@ mod tests {
     }
 
     #[test]
-    fn tokenize_unescapable_symbols() {
+    fn test_tokenize_unescapable_symbols() {
         t!(Body, r"\a"     => T("\\"), T("a"));
         t!(Body, r"\:"     => T(r"\"), T(":"));
         t!(Body, r"\="     => T(r"\"), T("="));
@@ -636,7 +620,7 @@ mod tests {
     }
 
     #[test]
-    fn tokenize_with_spans() {
+    fn test_tokenize_with_spans() {
         ts!(Body, "hello"          => s(0,0, 0,5, T("hello")));
         ts!(Body, "ab\r\nc"        => s(0,0, 0,2, T("ab")), s(0,2, 1,0, S(1)), s(1,0, 1,1, T("c")));
         ts!(Body, "// ab\r\n\nf"   => s(0,0, 0,5, LC(" ab")), s(0,5, 2,0, S(2)), s(2,0, 2,1, T("f")));

@@ -84,19 +84,13 @@ pub enum Token<'s> {
         terminated: bool,
     },
 
-    /// Raw text.
+    /// A raw block.
     Raw {
-        /// The raw text (not yet unescaped as for strings).
-        raw: &'s str,
-        /// Whether the closing backtick was present.
-        terminated: bool,
-    },
-
-    /// Multi-line code block.
-    Code {
-        /// The language of the code block, if specified.
+        /// The number of backticks the raw block was started with.
+        backticks: usize,
+        /// The language to highlight the code in if present.
         lang: Option<Spanned<&'s str>>,
-        /// The raw text (not yet unescaped as for strings).
+        /// The raw text.
         raw: &'s str,
         /// Whether the closing backticks were present.
         terminated: bool,
@@ -140,8 +134,7 @@ impl<'s> Token<'s> {
             Self::Backslash => "backslash",
             Self::Hashtag => "hashtag",
             Self::UnicodeEscape { .. } => "unicode escape sequence",
-            Self::Raw { .. } => "raw text",
-            Self::Code { .. } => "code block",
+            Self::Raw { .. } => "raw block",
             Self::Text(_) => "text",
             Self::Invalid("*/") => "end of block comment",
             Self::Invalid(_) => "invalid token",

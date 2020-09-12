@@ -58,34 +58,29 @@ pub fn unescape_string(string: &str) -> String {
     out
 }
 
-/// Resolves all escape sequences in raw markup (between backticks) and splits it into
-/// into lines.
-pub fn unescape_raw(raw: &str) -> Vec<String> {
-    let mut iter = raw.chars();
-    let mut text = String::new();
+/// Trims raw text and splits it into lines.
+///
+/// Returns whether at least one newline was contained in `raw`.
+pub fn trim_and_split_raw(raw: &str) -> (Vec<String>, bool) {
+    // Trims one whitespace at end and start.
+    let raw = raw.strip_prefix(' ').unwrap_or(raw);
+    let raw = raw.strip_suffix(' ').unwrap_or(raw);
 
-    while let Some(c) = iter.next() {
-        if c == '\\' {
-            if let Some(c) = iter.next() {
-                if c != '\\' && c != '`' {
-                    text.push('\\');
-                }
+    let mut lines = split_lines(raw);
+    let had_newline = lines.len() > 1;
+    let is_whitespace = |line: &String| line.chars().all(char::is_whitespace);
 
-                text.push(c);
-            } else {
-                text.push('\\');
-            }
-        } else {
-            text.push(c);
-        }
+    // Trims a sequence of whitespace followed by a newline at the start.
+    if lines.first().map(is_whitespace).unwrap_or(false) {
+        lines.remove(0);
     }
 
-    split_lines(&text)
-}
+    // Trims a newline followed by a sequence of whitespace at the end.
+    if lines.last().map(is_whitespace).unwrap_or(false) {
+        lines.pop();
+    }
 
-/// Converts a hexademical sequence (without braces or "\u") into a character.
-pub fn hex_to_char(sequence: &str) -> Option<char> {
-    u32::from_str_radix(sequence, 16).ok().and_then(std::char::from_u32)
+    (lines, had_newline)
 }
 
 /// Splits a string into a vector of lines (respecting Unicode & Windows line breaks).
@@ -110,12 +105,17 @@ pub fn split_lines(text: &str) -> Vec<String> {
     lines
 }
 
+/// Converts a hexademical sequence (without braces or "\u") into a character.
+pub fn hex_to_char(sequence: &str) -> Option<char> {
+    u32::from_str_radix(sequence, 16).ok().and_then(std::char::from_u32)
+}
+
 #[cfg(test)]
+#[rustfmt::skip]
 mod tests {
     use super::*;
 
     #[test]
-    #[rustfmt::skip]
     fn test_unescape_strings() {
         fn test(string: &str, expected: &str) {
             assert_eq!(unescape_string(string), expected.to_string());
@@ -136,29 +136,32 @@ mod tests {
     }
 
     #[test]
-    #[rustfmt::skip]
-    fn test_unescape_raws() {
+    fn test_trim_raw() {
         fn test(raw: &str, expected: Vec<&str>) {
-            assert_eq!(unescape_raw(raw), expected);
+            assert_eq!(trim_and_split_raw(raw).0, expected);
         }
 
-        test(r"raw\`",        vec!["raw`"]);
-        test(r"raw\\`",       vec![r"raw\`"]);
-        test("raw\ntext",     vec!["raw", "text"]);
-        test("a\r\nb",        vec!["a", "b"]);
-        test("a\n\nb",        vec!["a", "", "b"]);
-        test("a\r\x0Bb",      vec!["a", "", "b"]);
-        test("a\r\n\r\nb",    vec!["a", "", "b"]);
-        test(r"raw\a",        vec![r"raw\a"]);
-        test(r"raw\",         vec![r"raw\"]);
-        test(r"raw\\",        vec![r"raw\"]);
-        test(r"code`\``",     vec![r"code```"]);
-        test(r"code`\`a",     vec![r"code``a"]);
-        test(r"code``hi`\``", vec![r"code``hi```"]);
-        test(r"code`\\``",    vec![r"code`\``"]);
-        test(r"code`\`\`go",  vec![r"code```go"]);
-        test(r"code`\`\``",   vec![r"code````"]);
-        test(r"code\",        vec![r"code\"]);
-        test(r"code\a",       vec![r"code\a"]);
+        test(" hi",          vec!["hi"]);
+        test("  hi",         vec![" hi"]);
+        test("\nhi",         vec!["hi"]);
+        test("    \n hi",    vec![" hi"]);
+        test("hi ",          vec!["hi"]);
+        test("hi  ",         vec!["hi "]);
+        test("hi\n",         vec!["hi"]);
+        test("hi \n   ",     vec!["hi "]);
+        test("  \n hi \n  ", vec![" hi "]);
+    }
+
+    #[test]
+    fn test_split_lines() {
+        fn test(raw: &str, expected: Vec<&str>) {
+            assert_eq!(split_lines(raw), expected);
+        }
+
+        test("raw\ntext",  vec!["raw", "text"]);
+        test("a\r\nb",     vec!["a", "b"]);
+        test("a\n\nb",     vec!["a", "", "b"]);
+        test("a\r\x0Bb",   vec!["a", "", "b"]);
+        test("a\r\n\r\nb", vec!["a", "", "b"]);
     }
 }

@@ -10,7 +10,7 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 use crate::layout::Layoutable;
-use crate::syntax::{Code, Heading, Raw, SpanVec};
+use crate::syntax::{Heading, Raw, SpanVec};
 
 /// A collection of DOM nodes which form a tree together with the their children.
 pub type DomTree = SpanVec<DomNode>;
@@ -34,10 +34,8 @@ pub enum DomNode {
 
     /// A section heading.
     Heading(Heading<DomTree>),
-    /// A raw text node to be set in monospace.
+    /// An optionally syntax-highlighted block of raw text or code.
     Raw(Raw),
-    /// A code node to be syntax highlighted and set in monospace.
-    Code(Code),
 
     /// A dynamic node which can implement custom layouting behaviour.
     Dyn(BoxedNode),
