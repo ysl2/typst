@@ -31,11 +31,11 @@ pub enum DomNode {
 
     /// A text node to be set with the associated style.
     Text { text: String, style: Rc<TextStyle> },
+    /// An optionally syntax-highlighted block of raw text or code.
+    Raw { raw: Raw, style: Rc<TextStyle> },
 
     /// A section heading.
     Heading(Heading<DomTree>),
-    /// An optionally syntax-highlighted block of raw text or code.
-    Raw(Raw),
 
     /// A dynamic node which can implement custom layouting behaviour.
     Dyn(BoxedNode),
@@ -44,7 +44,7 @@ pub enum DomNode {
 /// A wrapper around a boxed dynamic node.
 //
 // Note: This is needed because the compiler can't `derive(PartialEq)`
-//       for `DomNode` when directly putting the boxed node in their,
+//       for `DomNode` when directly putting the boxed node in there,
 //       see https://github.com/rust-lang/rust/issues/31740
 #[derive(Debug, Clone)]
 pub struct BoxedNode(pub Box<dyn DynNode>);

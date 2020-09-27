@@ -99,7 +99,12 @@ impl Parser<'_> {
                 self.parse_heading().map(SyntaxNode::Heading)
             }
 
-            Token::Raw { backticks, lang, raw, terminated } => {
+            Token::Raw {
+                backticks,
+                lang,
+                raw,
+                terminated,
+            } => {
                 if !terminated {
                     error!(@self.feedback, end, "expected backtick(s)");
                 }
@@ -125,7 +130,10 @@ impl Parser<'_> {
             Token::Text(text) => self.with_span(SyntaxNode::Text(text.to_string())),
             Token::Hashtag => self.with_span(SyntaxNode::Text("#".to_string())),
 
-            Token::UnicodeEscape { sequence, terminated } => {
+            Token::UnicodeEscape {
+                sequence,
+                terminated,
+            } => {
                 if !terminated {
                     error!(@self.feedback, end, "expected closing brace");
                 }
@@ -148,18 +156,17 @@ impl Parser<'_> {
     }
 
     fn parse_heading(&mut self) -> Spanned<Heading<SyntaxTree>> {
-        let start = self.pos();
+        let level_start = self.pos();
         self.assert(Token::Hashtag);
 
+        // Find out the heading level by counting the number of hashtags.
         let mut level = 0;
         while self.peekv() == Some(Token::Hashtag) {
             level += 1;
             self.eat();
         }
 
-        let span = Span::new(start, self.pos());
-        let level = Spanned::new(level, span);
-
+        let level = Spanned::new(level, Span::new(level_start, self.pos()));
         if level.v > 5 {
             warning!(
                 @self.feedback, level.span,
@@ -169,14 +176,20 @@ impl Parser<'_> {
 
         self.skip_ws();
 
+        let content_start = self.pos();
         let mut contents = SyntaxTree::new();
+
+        // Read the content of the heading. The heading ends upon a top-level line break.
+        // Line breaks in blocks (for example, in a function body) do not end the heading.
         while !self.eof() && !matches!(self.peekv(), Some(Token::Space(n)) if n >= 1) {
             if let Some(node) = self.parse_node() {
                 contents.push(node);
             }
         }
 
-        let span = Span::new(start, self.pos());
+        let contents = Spanned::new(contents, Span::new(content_start, self.pos()));
+
+        let span = Span::merge(level.span, contents.span);
         Spanned::new(Heading { level, contents }, span)
     }
 }
@@ -295,7 +308,9 @@ impl Parser<'_> {
             if let Some(key) = key {
                 comma_and_keyless = false;
                 dict.insert(key.v.0, SpannedEntry::new(key.span, val));
-                self.feedback.decos.push(Spanned::new(Deco::DictKey, key.span));
+                self.feedback
+                    .decos
+                    .push(Spanned::new(Deco::DictKey, key.span));
             } else {
                 dict.push(SpannedEntry::val(val));
             }
@@ -567,7 +582,11 @@ impl<'s> Parser<'s> {
     }
 
     fn check_eat(&mut self, token: Token<'_>) -> Option<Spanned<Token<'s>>> {
-        if self.check(token) { self.eat() } else { None }
+        if self.check(token) {
+            self.eat()
+        } else {
+            None
+        }
     }
 
     /// Checks if the next token is of some kind

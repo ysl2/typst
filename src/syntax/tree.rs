@@ -21,7 +21,7 @@ pub type SyntaxTree = SpanVec<SyntaxNode>;
 /// code.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SyntaxNode {
-    /// Whitespace containing less than two newlines.
+    /// A space.
     Space,
     /// A forced line break.
     Linebreak,
@@ -33,10 +33,10 @@ pub enum SyntaxNode {
     ToggleBolder,
     /// Plain text.
     Text(String),
-    /// Section headings.
-    Heading(Heading<SyntaxTree>),
     /// An optionally syntax-highlighted block of raw text or code.
     Raw(Raw),
+    /// Section headings.
+    Heading(Heading<SyntaxTree>),
     /// A function call.
     Call(Call),
 }
@@ -48,21 +48,78 @@ pub struct Heading<T> {
     /// (corresponds to the number of hashtags minus `1`).
     pub level: Spanned<u8>,
     /// The contents of the heading.
-    pub contents: T,
+    pub contents: Spanned<T>,
 }
 
-/// An optionally syntax-highlighted block of raw text or code.
+/// A raw text block, rendered in monospace with optional syntax highlighting.
+///
+/// Raw blocks start with an arbitrary number of backticks and end with the same number of
+/// backticks. If you want to include a sequence of backticks in a raw block, simply
+/// surround the block with more backticks.
+///
+/// When using at least two backticks, an optional language tag may follow directly after
+/// the backticks. This tag defines which language to syntax-highlight the text in. Apart
+/// from the language tag and some whitespace trimming discussed below, everything inside
+/// a raw block is rendered verbatim, in particular, there are no escape sequences.
+///
+/// # Examples
+/// - Raw text is surrounded by backticks.
+///   ```typst
+///   `raw`
+///   ```
+/// - An optional language tag may follow directly at the start when the block is
+///   surrounded by at least two backticks.
+///   ```typst
+///   ``rust println!("hello!")``;
+///   ```
+/// - Blocks can span multiple lines.
+///   ```typst
+///   ``rust
+///   loop {
+///      find_yak().shave();
+///   }
+///   ``
+///   ```
+/// - Start with a space to omit the language tag (the space will be trimmed from the
+///   output) and use more backticks to allow backticks in the raw text.
+///   `````typst
+///   ```` This contains ```backticks``` inside. ````
+///   `````
+///
+/// # Trimming
+/// If we would always render the raw text between the backticks exactly as given, a few
+/// things would become problematic or even impossible:
+/// - Typical multiline code blocks (like in the example above) would have an additional
+///   newline before and after the code.
+/// - Raw text wrapped in more than one backtick could not exist without leading
+///   whitespace since the first word would be interpreted as a language tag.
+/// - A single backtick without surrounding spaces could not exist as raw text since it
+///   would be interpreted as belonging to the opening or closing backticks.
+///
+/// To fix these problems, we trim text in multi-backtick blocks as follows:
+/// - We trim a single space or a sequence of whitespace followed by a newline at the
+///   start.
+/// - We trim a single space or a newline followed by a sequence of whitespace at the
+///   end.
+///
+/// With these rules, a single raw backtick can be produced by the sequence ``` `` ` ``
+/// ```, ``` `` unhighlighted text `` ``` has no surrounding spaces and multiline code
+/// blocks don't have extra empty lines. Note that you can always force leading or
+/// trailing whitespace simply by adding more spaces.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Raw {
-    /// The language to highlight the code in if present.
+    /// An optional identifier specifying the language to syntax-highlight in.
     pub lang: Option<Spanned<Ident>>,
-    /// The lines of raw text (the text is split at newlines by the parser).
+    /// The lines of raw text, determined as the raw string between the backticks trimmed
+    /// according to the above rules and split at newlines.
     pub lines: Vec<String>,
-    /// Whether this element is "block"-level.
+    /// Whether the element is block-level.
     ///
-    /// - If true, this should be separated into its own paragraph
-    ///   independently of its surroundings.
-    /// - If false, this element can be set inline.
+    /// - When false, it will be layouted integrated within the surrounding paragraph.
+    /// - When true, it will be separated into its own paragraph.
+    ///
+    /// The element becomes block-level when at least one newline is present between the
+    /// backticks. Note that `lines.len()` may still be one in this case due to trimming.
     pub block: bool,
 }
 
@@ -261,7 +318,6 @@ impl DictExpr {
             None
         })
     }
-
 
     /// Retrieve and remove all matching values with number keys, skipping and
     /// ignoring non-matching entries.
@@ -529,10 +585,10 @@ mod tests {
             dict.expect::<String>("", Span::ZERO, &mut f),
             Some("hi".to_string())
         );
-        assert_eq!(f.diagnostics, [error!(
-            Span::ZERO,
-            "expected string, found bool"
-        )]);
+        assert_eq!(
+            f.diagnostics,
+            [error!(Span::ZERO, "expected string, found bool")]
+        );
         assert_eq!(dict.len(), 1);
     }
 
@@ -544,10 +600,10 @@ mod tests {
         dict.insert("hi", entry(Expr::Bool(true)));
         assert_eq!(dict.take::<bool>(), Some(false));
         assert_eq!(dict.take_key::<f64>("hi", &mut f), None);
-        assert_eq!(f.diagnostics, [error!(
-            Span::ZERO,
-            "expected number, found bool"
-        )]);
+        assert_eq!(
+            f.diagnostics,
+            [error!(Span::ZERO, "expected number, found bool")]
+        );
         assert!(dict.is_empty());
     }
 
@@ -557,10 +613,10 @@ mod tests {
         dict.insert(1, entry(Expr::Bool(false)));
         dict.insert(3, entry(Expr::Number(0.0)));
         dict.insert(7, entry(Expr::Bool(true)));
-        assert_eq!(dict.take_all_num::<bool>().collect::<Vec<_>>(), [
-            (1, false),
-            (7, true)
-        ],);
+        assert_eq!(
+            dict.take_all_num::<bool>().collect::<Vec<_>>(),
+            [(1, false), (7, true)],
+        );
         assert_eq!(dict.len(), 1);
         assert_eq!(dict[3].val.v, Expr::Number(0.0));
     }

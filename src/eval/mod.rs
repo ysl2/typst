@@ -56,7 +56,11 @@ pub struct EvalCtx {
 impl EvalCtx {
     /// Create a new evaluation context with empty feedback.
     pub fn new(state: State, funcs: Scope) -> Self {
-        Self { f: Feedback::new(), state, funcs }
+        Self {
+            f: Feedback::new(),
+            state,
+            funcs,
+        }
     }
 }
 
@@ -91,9 +95,15 @@ impl Eval for SyntaxTree {
     fn eval(self, ctx: &mut EvalCtx) -> Self::Output {
         let mut dom = DomTree::new();
 
-        for Spanned { v: syntax_node, span } in self {
+        for Spanned {
+            v: syntax_node,
+            span,
+        } in self
+        {
             let dom_node = match syntax_node {
-                SyntaxNode::Space => DomNode::Space { width: ctx.state.text.font_size() },
+                SyntaxNode::Space => DomNode::Space {
+                    width: ctx.state.text.font_size(),
+                },
                 SyntaxNode::Linebreak => DomNode::Linebreak {
                     line_height: ctx.state.text.line_height(),
                     line_padding: ctx.state.text.line_padding(),
@@ -101,6 +111,7 @@ impl Eval for SyntaxTree {
                 SyntaxNode::Parbreak => DomNode::Parbreak {
                     par_spacing: ctx.state.text.par_spacing(),
                 },
+
                 SyntaxNode::ToggleItalic => {
                     ctx.f.decos.push(Spanned::new(Deco::Italic, span));
                     Rc::make_mut(&mut ctx.state.text).italic ^= true;
@@ -111,6 +122,7 @@ impl Eval for SyntaxTree {
                     Rc::make_mut(&mut ctx.state.text).bolder ^= true;
                     continue;
                 }
+
                 SyntaxNode::Text(text) => {
                     if ctx.state.text.italic {
                         ctx.f.decos.push(Spanned::new(Deco::Italic, span));
@@ -118,10 +130,18 @@ impl Eval for SyntaxTree {
                     if ctx.state.text.bolder {
                         ctx.f.decos.push(Spanned::new(Deco::Bold, span));
                     }
-                    DomNode::Text { text, style: Rc::clone(&ctx.state.text) }
+                    DomNode::Text {
+                        text,
+                        style: Rc::clone(&ctx.state.text),
+                    }
                 }
+                SyntaxNode::Raw(raw) => DomNode::Raw {
+                    raw,
+                    style: Rc::clone(&ctx.state.text),
+                },
+
                 SyntaxNode::Heading(heading) => DomNode::Heading(heading.eval(ctx)),
-                SyntaxNode::Raw(raw) => DomNode::Raw(raw),
+
                 SyntaxNode::Call(call) => {
                     let value = Spanned::new(call.eval(ctx), span);
                     dom.extend(value.flatten_tree());
@@ -142,7 +162,7 @@ impl Eval for Heading<SyntaxTree> {
     fn eval(self, ctx: &mut EvalCtx) -> Self::Output {
         Heading {
             level: self.level,
-            contents: self.contents.eval(ctx),
+            contents: self.contents.map(|contents| contents.eval(ctx)),
         }
     }
 }

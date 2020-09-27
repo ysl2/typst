@@ -21,8 +21,8 @@ fn T(text: &str) -> SyntaxNode {
 macro_rules! H {
     ($level:expr, $($tts:tt)*) => {
         SyntaxNode::Heading(Heading {
-            level: Spanned::zero($level),
-            contents: Tree![@$($tts)*],
+            level: Into::<Spanned<u8>>::into($level),
+            contents: Into::<Spanned<SyntaxTree>>::into(Tree![@$($tts)*]),
         })
     };
 }

@@ -67,9 +67,18 @@ pub async fn typeset(
     state: State,
     funcs: Scope,
 ) -> Pass<Vec<Layout>> {
-    let Pass { output: tree, mut feedback } = parse::parse(src);
-    let Pass { output: dom, feedback: f2 } = eval::eval(tree, state, funcs);
-    let Pass { output: layouts, feedback: f3 } = layout::layout(&dom, loader).await;
+    let Pass {
+        output: tree,
+        mut feedback,
+    } = parse::parse(src);
+    let Pass {
+        output: dom,
+        feedback: f2,
+    } = eval::eval(tree, state, funcs);
+    let Pass {
+        output: layouts,
+        feedback: f3,
+    } = layout::layout(&dom, loader).await;
 
     feedback.extend(f2);
     feedback.extend(f3);
@@ -94,7 +103,10 @@ impl<T> Pass<T> {
 
     /// Create a new pass with empty feedback.
     pub fn ok(output: T) -> Self {
-        Self { output, feedback: Feedback::new() }
+        Self {
+            output,
+            feedback: Feedback::new(),
+        }
     }
 
     /// Map the output type and keep the feedback data.
@@ -118,7 +130,10 @@ pub struct Feedback {
 impl Feedback {
     /// Create a new feedback instance without errors and decos.
     pub fn new() -> Self {
-        Self { diagnostics: vec![], decos: vec![] }
+        Self {
+            diagnostics: vec![],
+            decos: vec![],
+        }
     }
 
     /// Merged two feedbacks into one.

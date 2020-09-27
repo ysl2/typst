@@ -1,19 +1,20 @@
 //! Font handling shim.
 
 use std::cell::RefCell;
+use std::fmt::{self, Debug, Formatter};
 use std::ops::Deref;
 use std::rc::Rc;
 
 use fontdock::{ContainsChar, FaceFromVec, FontProvider};
 use ttf_parser::Face;
 
-/// A referenced-count shared font loader backed by a dynamic provider.
+/// A referenced-counted shared font loader backed by a dynamic font provider.
 pub type SharedFontLoader = Rc<RefCell<FontLoader>>;
 
 /// A font loader backed by a dynamic provider.
 pub type FontLoader = fontdock::FontLoader<Box<DynProvider>>;
 
-/// The dynamic font provider type backing the font loader.
+/// The dynamic font provider backing the font loader.
 pub type DynProvider = dyn FontProvider<Face = OwnedFace>;
 
 /// An owned font face.
@@ -55,5 +56,11 @@ impl Deref for OwnedFace {
 
     fn deref(&self) -> &Self::Target {
         &self.face
+    }
+}
+
+impl Debug for OwnedFace {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        f.pad("OwnedFace")
     }
 }
