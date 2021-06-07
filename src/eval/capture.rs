@@ -1,10 +1,8 @@
-use std::rc::Rc;
-
 use super::{Scope, Scopes, Value};
 use crate::syntax::visit::{visit_expr, Visit};
 use crate::syntax::{Expr, Ident, Node};
 
-/// A visitor that captures variable slots.
+/// A visitor that captures variables by value.
 #[derive(Debug)]
 pub struct CapturesVisitor<'a> {
     external: &'a Scopes<'a>,
@@ -32,7 +30,7 @@ impl<'a> CapturesVisitor<'a> {
     fn process(&mut self, name: &str) {
         if self.internal.get(name).is_none() {
             if let Some(slot) = self.external.get(name) {
-                self.captures.def_slot(name, Rc::clone(slot));
+                self.captures.def_const(name, slot.borrow().clone());
             }
         }
     }

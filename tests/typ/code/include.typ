@@ -1,23 +1,22 @@
-// Test include statements.
+// Test including file contents with import.
 
 ---
 = Document
 
 // Include a file
-#include "importable/chap1.typ"
+#import "importable/chap1.typ"
 
 // The variables of the file should not appear in this scope.
 // Error: 1-6 unknown variable
 #name
 
 // Expression as a file name.
-#let chap2 = include "import" + "able/chap" + "2.typ"
 
 _ -- Intermission -- _
-#chap2
+#import "import" + "able/chap" + "2.typ"
 
 {
     // Expressions, code mode.
-    // Error: 21-43 file not found
-    let x = include "importable/chap3.typ"
+    // Error: 12-34 file not found
+    import "importable/chap3.typ"
 }

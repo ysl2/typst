@@ -2,7 +2,7 @@
 
 ---
 // Empty array.
-#for x in () [Nope]
+#for x in () {[Nope]}
 
 // Array.
 #let sum = 0
@@ -13,10 +13,10 @@
 #test(sum, 15)
 
 // Dictionary is not traversed in insertion order.
-// Should output `age: 1, name: Typst,`.
-#for k, v in (Name: "Typst", Age: 2) [
-    {k}: {v}.
-]
+// Should output `Age: 2. Name: Typst.`.
+#for k, v in (Name: "Typst", Age: 2) {
+    [#k: #v. ]
+}
 
 // String.
 {
@@ -46,15 +46,17 @@
      } + "]"
 }
 
-// Template body.
 // Should output `234`.
-#for v in (1, 2, 3, 4, 5, 6, 7) [#if v >= 2 and v <= 5 { repr(v) }]
+#for v in (1, 2, 3, 4, 5, 6, 7) {
+    if v >= 2 and v <= 5 {
+        repr(v)
+    }
+}
 
 ---
 // Value of for loops.
 // Ref: false
 #test(type(for v in () {}), "template")
-#test(type(for v in () []), "template")
 
 ---
 // Uniterable expression.

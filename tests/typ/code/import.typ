@@ -1,4 +1,4 @@
-// Test import statements.
+// Test using items with import.
 
 ---
 // Test importing semantics.
@@ -71,24 +71,20 @@
 #using "target.typ"
 
 // Should output `target`.
-// Error: 3:9-4:8 file not found
-// Error: 3:8 expected semicolon or line break
-// Error: 2:8 expected keyword `using`
+// Error: 2:9-3:8 file not found
+// Error: 2:8 expected semicolon or line break
 #import "target.typ
 using "target
 
 // Should output `@ 0.2.1 using`.
-// Error: 2:21 expected semicolon or line break
-// Error: 1:21 expected keyword `using`
+// Error: 21 expected semicolon or line break
 #import "target.typ" @ 0.2.1 using *
 
-// Error: 3:21 expected keyword `using`
 // Error: 2:21 expected semicolon or line break
 // Error: 1:22-1:28 unexpected keyword `using`
 #import "target.typ" #using *
 
-// Error: 2:21 expected semicolon or line break
-// Error: 1:21 expected keyword `using`
+// Error: 21 expected semicolon or line break
 #import "target.typ" usinga,b,c
 
 // Error: 27 expected import items

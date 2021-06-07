@@ -43,7 +43,7 @@ fn main() -> anyhow::Result<()> {
     // Compile.
     let mut cache = typst::cache::Cache::new(&loader);
     let scope = typst::library::new();
-    let state = typst::exec::State::default();
+    let state = typst::eval::State::default();
     let pass = typst::typeset(
         &mut loader,
         &mut cache,

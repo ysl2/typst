@@ -26,13 +26,13 @@ pub fn lang(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
         None => None,
     };
 
-    Value::template("lang", move |ctx| {
-        if let Some(dir) = dir.or(iso) {
-            ctx.state.lang.dir = dir;
-        }
+    if let Some(dir) = dir.or(iso) {
+        ctx.state.lang.dir = dir;
+    }
 
-        ctx.parbreak();
-    })
+    ctx.parbreak();
+
+    Value::None
 }
 
 /// The default direction for the language identified by `iso`.

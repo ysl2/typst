@@ -79,10 +79,9 @@ fn node(p: &mut Parser, at_start: &mut bool) -> Option<Node> {
         | Token::If
         | Token::While
         | Token::For
-        | Token::Import
-        | Token::Include => {
+        | Token::Import => {
             *at_start = false;
-            let stmt = token == Token::Let || token == Token::Import;
+            let stmt = matches!(token, Token::Let | Token::Import);
             let group = if stmt { Group::Stmt } else { Group::Expr };
 
             p.start_group(group, TokenMode::Code);
@@ -286,7 +285,6 @@ fn primary(p: &mut Parser, atomic: bool) -> Option<Expr> {
         Some(Token::While) => expr_while(p),
         Some(Token::For) => expr_for(p),
         Some(Token::Import) => expr_import(p),
-        Some(Token::Include) => expr_include(p),
 
         // Nothing.
         _ => {
@@ -556,6 +554,91 @@ fn expr_let(p: &mut Parser) -> Option<Expr> {
     expr_let
 }
 
+/// Parse an if expresion.
+fn expr_if(p: &mut Parser) -> Option<Expr> {
+    let start = p.start();
+    p.assert(Token::If);
+
+    let mut expr_if = None;
+    if let Some(condition) = expr(p) {
+        if let Some(if_body) = body(p, true) {
+            let mut else_body = None;
+
+            // We are in code mode but still want to react to `#else` if the
+            // outer mode is markup.
+            if match p.outer_mode() {
+                TokenMode::Markup => p.eat_if(Token::Invalid("#else")),
+                TokenMode::Code => p.eat_if(Token::Else),
+            } {
+                else_body = body(p, true);
+            }
+
+            expr_if = Some(Expr::If(IfExpr {
+                span: p.span(start),
+                condition: Box::new(condition),
+                if_body: Box::new(if_body),
+                else_body: else_body.map(Box::new),
+            }));
+        }
+    }
+
+    expr_if
+}
+
+/// Parse a while expresion.
+fn expr_while(p: &mut Parser) -> Option<Expr> {
+    let start = p.start();
+    p.assert(Token::While);
+
+    let mut expr_while = None;
+    if let Some(condition) = expr(p) {
+        if let Some(body) = body(p, false) {
+            expr_while = Some(Expr::While(WhileExpr {
+                span: p.span(start),
+                condition: Box::new(condition),
+                body: Box::new(body),
+            }));
+        }
+    }
+
+    expr_while
+}
+
+/// Parse a for expression.
+fn expr_for(p: &mut Parser) -> Option<Expr> {
+    let start = p.start();
+    p.assert(Token::For);
+
+    let mut expr_for = None;
+    if let Some(pattern) = for_pattern(p) {
+        if p.expect(Token::In) {
+            if let Some(iter) = expr(p) {
+                if let Some(body) = body(p, false) {
+                    expr_for = Some(Expr::For(ForExpr {
+                        span: p.span(start),
+                        pattern,
+                        iter: Box::new(iter),
+                        body: Box::new(body),
+                    }));
+                }
+            }
+        }
+    }
+
+    expr_for
+}
+
+/// Parse a for loop pattern.
+fn for_pattern(p: &mut Parser) -> Option<ForPattern> {
+    let first = ident(p)?;
+    if p.eat_if(Token::Comma) {
+        if let Some(second) = ident(p) {
+            return Some(ForPattern::KeyValue(first, second));
+        }
+    }
+    Some(ForPattern::Value(first))
+}
+
 /// Parse an import expression.
 fn expr_import(p: &mut Parser) -> Option<Expr> {
     let start = p.start();
@@ -563,7 +646,7 @@ fn expr_import(p: &mut Parser) -> Option<Expr> {
 
     let mut expr_import = None;
     if let Some(path) = expr(p) {
-        let imports = if p.expect(Token::Using) {
+        let imports = if p.eat_if(Token::Using) {
             if p.eat_if(Token::Star) {
                 // This is the wildcard scenario.
                 Imports::Wildcard
@@ -593,104 +676,6 @@ fn expr_import(p: &mut Parser) -> Option<Expr> {
     expr_import
 }
 
-/// Parse an include expression.
-fn expr_include(p: &mut Parser) -> Option<Expr> {
-    let start = p.start();
-    p.assert(Token::Include);
-
-    expr(p).map(|path| {
-        Expr::Include(IncludeExpr {
-            span: p.span(start),
-            path: Box::new(path),
-        })
-    })
-}
-
-/// Parse an if expresion.
-fn expr_if(p: &mut Parser) -> Option<Expr> {
-    let start = p.start();
-    p.assert(Token::If);
-
-    let mut expr_if = None;
-    if let Some(condition) = expr(p) {
-        if let Some(if_body) = body(p) {
-            let mut else_body = None;
-
-            // We are in code mode but still want to react to `#else` if the
-            // outer mode is markup.
-            if match p.outer_mode() {
-                TokenMode::Markup => p.eat_if(Token::Invalid("#else")),
-                TokenMode::Code => p.eat_if(Token::Else),
-            } {
-                else_body = body(p);
-            }
-
-            expr_if = Some(Expr::If(IfExpr {
-                span: p.span(start),
-                condition: Box::new(condition),
-                if_body: Box::new(if_body),
-                else_body: else_body.map(Box::new),
-            }));
-        }
-    }
-
-    expr_if
-}
-
-/// Parse a while expresion.
-fn expr_while(p: &mut Parser) -> Option<Expr> {
-    let start = p.start();
-    p.assert(Token::While);
-
-    let mut expr_while = None;
-    if let Some(condition) = expr(p) {
-        if let Some(body) = body(p) {
-            expr_while = Some(Expr::While(WhileExpr {
-                span: p.span(start),
-                condition: Box::new(condition),
-                body: Box::new(body),
-            }));
-        }
-    }
-
-    expr_while
-}
-
-/// Parse a for expression.
-fn expr_for(p: &mut Parser) -> Option<Expr> {
-    let start = p.start();
-    p.assert(Token::For);
-
-    let mut expr_for = None;
-    if let Some(pattern) = for_pattern(p) {
-        if p.expect(Token::In) {
-            if let Some(iter) = expr(p) {
-                if let Some(body) = body(p) {
-                    expr_for = Some(Expr::For(ForExpr {
-                        span: p.span(start),
-                        pattern,
-                        iter: Box::new(iter),
-                        body: Box::new(body),
-                    }));
-                }
-            }
-        }
-    }
-
-    expr_for
-}
-
-/// Parse a for loop pattern.
-fn for_pattern(p: &mut Parser) -> Option<ForPattern> {
-    let first = ident(p)?;
-    if p.eat_if(Token::Comma) {
-        if let Some(second) = ident(p) {
-            return Some(ForPattern::KeyValue(first, second));
-        }
-    }
-    Some(ForPattern::Value(first))
-}
-
 /// Parse an identifier.
 fn ident(p: &mut Parser) -> Option<Ident> {
     if let Some(Token::Ident(string)) = p.peek() {
@@ -705,9 +690,9 @@ fn ident(p: &mut Parser) -> Option<Ident> {
 }
 
 /// Parse a control flow body.
-fn body(p: &mut Parser) -> Option<Expr> {
+fn body(p: &mut Parser, allow_template: bool) -> Option<Expr> {
     match p.peek() {
-        Some(Token::LeftBracket) => Some(template(p)),
+        Some(Token::LeftBracket) if allow_template => Some(template(p)),
         Some(Token::LeftBrace) => Some(block(p, true)),
         _ => {
             p.expected_at("body", p.end());

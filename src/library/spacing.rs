@@ -8,7 +8,7 @@ use super::*;
 /// # Return value
 /// A template that inserts horizontal spacing.
 pub fn h(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
-    spacing_impl("h", ctx, args, GenAxis::Cross)
+    spacing_impl(ctx, args, GenAxis::Cross)
 }
 
 /// `v`: Vertical spacing.
@@ -19,20 +19,18 @@ pub fn h(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
 /// # Return value
 /// A template that inserts vertical spacing.
 pub fn v(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
-    spacing_impl("v", ctx, args, GenAxis::Main)
+    spacing_impl(ctx, args, GenAxis::Main)
 }
 
 fn spacing_impl(
-    name: &str,
     ctx: &mut EvalContext,
     args: &mut FuncArgs,
     axis: GenAxis,
 ) -> Value {
     let spacing: Option<Linear> = args.eat_expect(ctx, "spacing");
-    Value::template(name, move |ctx| {
-        if let Some(linear) = spacing {
-            let amount = linear.resolve(ctx.state.font.resolve_size());
-            ctx.push_spacing(axis, amount);
-        }
-    })
+    if let Some(linear) = spacing {
+        let amount = linear.resolve(ctx.state.font.resolve_size());
+        ctx.push_spacing(axis, amount);
+    }
+    Value::None
 }

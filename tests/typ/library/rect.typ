@@ -12,7 +12,9 @@
 #rect(width: 3cm, height: 12pt, fill: #CB4CED)
 
 // Fixed width, text height.
-#rect(width: 2cm, fill: #9650D6, pad(5pt)[Fixed and padded])
+#rect(width: 2cm, fill: #9650D6)[
+  #pad(5pt)[Fixed and padded]
+]
 
 // Page width, fixed height.
 #rect(height: 1cm, width: 100%, fill: #734CED)[Topleft]

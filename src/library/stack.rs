@@ -22,19 +22,19 @@ pub fn stack(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
     let dir = args.eat_named::<Dir>(ctx, "dir").unwrap_or(Dir::TTB);
     let children = args.eat_all::<TemplateValue>(ctx);
 
-    Value::template("stack", move |ctx| {
-        let children = children
-            .iter()
-            .map(|child| {
-                let child = ctx.exec_template(child).into();
-                StackChild::Any(child, ctx.state.aligns)
-            })
-            .collect();
+    let children = children
+        .iter()
+        .map(|child| {
+            let child = ctx.show_template(child).into();
+            StackChild::Any(child, ctx.state.aligns)
+        })
+        .collect();
 
-        ctx.push(StackNode {
-            dirs: Gen::new(ctx.state.lang.dir, dir),
-            aspect: None,
-            children,
-        });
-    })
+    ctx.push(StackNode {
+        dirs: Gen::new(ctx.state.lang.dir, dir),
+        aspect: None,
+        children,
+    });
+
+    Value::None
 }

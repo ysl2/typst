@@ -40,67 +40,66 @@ pub fn page(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
     let body = args.eat::<TemplateValue>(ctx);
     let span = args.span;
 
-    Value::template("page", move |ctx| {
-        let snapshot = ctx.state.clone();
+    let snapshot = ctx.state.clone();
 
-        if let Some(paper) = paper {
-            ctx.state.page.class = paper.class;
-            ctx.state.page.size = paper.size();
-        }
+    if let Some(paper) = paper {
+        ctx.state.page.class = paper.class;
+        ctx.state.page.size = paper.size();
+    }
 
-        if let Some(width) = width {
-            ctx.state.page.class = PaperClass::Custom;
-            ctx.state.page.size.width = width;
-        }
+    if let Some(width) = width {
+        ctx.state.page.class = PaperClass::Custom;
+        ctx.state.page.size.width = width;
+    }
 
-        if let Some(height) = height {
-            ctx.state.page.class = PaperClass::Custom;
-            ctx.state.page.size.height = height;
-        }
+    if let Some(height) = height {
+        ctx.state.page.class = PaperClass::Custom;
+        ctx.state.page.size.height = height;
+    }
 
-        if let Some(margins) = margins {
-            ctx.state.page.margins = Sides::splat(Some(margins));
-        }
+    if let Some(margins) = margins {
+        ctx.state.page.margins = Sides::splat(Some(margins));
+    }
 
-        if let Some(left) = left {
-            ctx.state.page.margins.left = Some(left);
-        }
+    if let Some(left) = left {
+        ctx.state.page.margins.left = Some(left);
+    }
 
-        if let Some(top) = top {
-            ctx.state.page.margins.top = Some(top);
-        }
+    if let Some(top) = top {
+        ctx.state.page.margins.top = Some(top);
+    }
 
-        if let Some(right) = right {
-            ctx.state.page.margins.right = Some(right);
-        }
+    if let Some(right) = right {
+        ctx.state.page.margins.right = Some(right);
+    }
 
-        if let Some(bottom) = bottom {
-            ctx.state.page.margins.bottom = Some(bottom);
-        }
+    if let Some(bottom) = bottom {
+        ctx.state.page.margins.bottom = Some(bottom);
+    }
 
-        if flip.unwrap_or(false) {
-            let page = &mut ctx.state.page;
-            std::mem::swap(&mut page.size.width, &mut page.size.height);
-        }
+    if flip.unwrap_or(false) {
+        let page = &mut ctx.state.page;
+        std::mem::swap(&mut page.size.width, &mut page.size.height);
+    }
 
-        ctx.pagebreak(false, true, span);
+    ctx.pagebreak(false, true, span);
 
-        if let Some(body) = &body {
-            // TODO: Restrict body to a single page?
-            body.exec(ctx);
-            ctx.state = snapshot;
-            ctx.pagebreak(true, false, span);
-        }
-    })
+    if let Some(body) = &body {
+        // TODO: Restrict body to a single page?
+        body.show(ctx);
+        ctx.state = snapshot;
+        ctx.pagebreak(true, false, span);
+    }
+
+    Value::None
 }
 
 /// `pagebreak`: Start a new page.
 ///
 /// # Return value
 /// A template that inserts a page break.
-pub fn pagebreak(_: &mut EvalContext, args: &mut FuncArgs) -> Value {
+pub fn pagebreak(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
     let span = args.span;
-    Value::template("pagebreak", move |ctx| {
-        ctx.pagebreak(true, true, span);
-    })
+    ctx.pagebreak(true, true, span);
+    Value::None
 }

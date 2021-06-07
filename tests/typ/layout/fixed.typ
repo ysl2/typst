@@ -11,4 +11,4 @@ L #right[R] \
 
 // Pad inherits expansion behaviour.
 #pad[PL #right[PR]] \
-#rect(pad[PL #right[PR]])
+#rect[#pad[PL #right[PR]]]

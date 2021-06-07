@@ -12,20 +12,18 @@ use crate::syntax::{HeadingNode, RawNode};
 ///
 /// # Return value
 /// A template that inserts a line break.
-pub fn linebreak(_: &mut EvalContext, _: &mut FuncArgs) -> Value {
-    Value::template(Node::LINEBREAK, move |ctx| {
-        ctx.linebreak();
-    })
+pub fn linebreak(ctx: &mut EvalContext, _: &mut FuncArgs) -> Value {
+    ctx.linebreak();
+    Value::None
 }
 
 /// `parbreak`: Start a new paragraph.
 ///
 /// # Return value
 /// A template that inserts a paragraph break.
-pub fn parbreak(_: &mut EvalContext, _: &mut FuncArgs) -> Value {
-    Value::template(Node::PARBREAK, move |ctx| {
-        ctx.parbreak();
-    })
+pub fn parbreak(ctx: &mut EvalContext, _: &mut FuncArgs) -> Value {
+    ctx.parbreak();
+    Value::None
 }
 
 /// `strong`: Strong text.
@@ -44,15 +42,15 @@ pub fn parbreak(_: &mut EvalContext, _: &mut FuncArgs) -> Value {
 /// body if present.
 pub fn strong(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
     let body = args.eat::<TemplateValue>(ctx);
-    Value::template(Node::STRONG, move |ctx| {
-        let snapshot = ctx.state.clone();
-        ctx.state.font.strong ^= true;
+    let snapshot = ctx.state.clone();
+    ctx.state.font.strong ^= true;
 
-        if let Some(body) = &body {
-            body.exec(ctx);
-            ctx.state = snapshot;
-        }
-    })
+    if let Some(body) = &body {
+        body.show(ctx);
+        ctx.state = snapshot;
+    }
+
+    Value::None
 }
 
 /// `emph`: Emphasized text.
@@ -71,15 +69,15 @@ pub fn strong(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
 /// to the body if present.
 pub fn emph(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
     let body = args.eat::<TemplateValue>(ctx);
-    Value::template(Node::EMPH, move |ctx| {
-        let snapshot = ctx.state.clone();
-        ctx.state.font.emph ^= true;
+    let snapshot = ctx.state.clone();
+    ctx.state.font.emph ^= true;
 
-        if let Some(body) = &body {
-            body.exec(ctx);
-            ctx.state = snapshot;
-        }
-    })
+    if let Some(body) = &body {
+        body.show(ctx);
+        ctx.state = snapshot;
+    }
+
+    Value::None
 }
 
 /// `heading`: A section heading.
@@ -109,17 +107,17 @@ pub fn heading(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
         .eat_expect::<TemplateValue>(ctx, HeadingNode::BODY)
         .unwrap_or_default();
 
-    Value::template(Node::HEADING, move |ctx| {
-        let snapshot = ctx.state.clone();
-        let upscale = 1.6 - 0.1 * level as f64;
-        ctx.state.font.scale *= upscale;
-        ctx.state.font.strong = true;
+    let snapshot = ctx.state.clone();
+    let upscale = 1.6 - 0.1 * level as f64;
+    ctx.state.font.scale *= upscale;
+    ctx.state.font.strong = true;
 
-        body.exec(ctx);
-        ctx.state = snapshot;
+    body.show(ctx);
+    ctx.state = snapshot;
 
-        ctx.parbreak();
-    })
+    ctx.parbreak();
+
+    Value::None
 }
 
 /// `raw`: Raw text.
@@ -153,18 +151,18 @@ pub fn raw(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
     let _lang = args.eat_named::<String>(ctx, RawNode::LANG);
     let block = args.eat_named(ctx, RawNode::BLOCK).unwrap_or(false);
 
-    Value::template(Node::RAW, move |ctx| {
-        if block {
-            ctx.parbreak();
-        }
+    if block {
+        ctx.parbreak();
+    }
 
-        let snapshot = ctx.state.clone();
-        ctx.set_monospace();
-        ctx.push_text(&text);
-        ctx.state = snapshot;
+    let snapshot = ctx.state.clone();
+    ctx.set_monospace();
+    ctx.push_text(&text);
+    ctx.state = snapshot;
 
-        if block {
-            ctx.parbreak();
-        }
-    })
+    if block {
+        ctx.parbreak();
+    }
+
+    Value::None
 }

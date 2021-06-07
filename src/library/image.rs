@@ -31,11 +31,11 @@ pub fn image(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
         }
     }
 
-    Value::template("image", move |ctx| {
-        if let Some(node) = node {
-            ctx.push(node);
-        }
-    })
+    if let Some(node) = node {
+        ctx.push(node);
+    }
+
+    Value::None
 }
 
 /// An image node.

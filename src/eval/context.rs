@@ -1,6 +1,6 @@
 use std::mem;
 
-use super::{Exec, FontFamily, State};
+use super::*;
 use crate::diag::{Diag, DiagSet, Pass};
 use crate::eval::TemplateValue;
 use crate::geom::{Align, Dir, Gen, GenAxis, Length, Linear, Sides, Size};
@@ -9,11 +9,21 @@ use crate::layout::{
 };
 use crate::syntax::Span;
 
-/// The context for execution.
-pub struct ExecContext {
+/// The context for evaluation.
+pub struct EvalContext<'a> {
+    /// The loader from which resources (files and images) are loaded.
+    pub loader: &'a mut dyn Loader,
+    /// A cache for loaded resources.
+    pub cache: &'a mut Cache,
+    /// The active scopes.
+    pub scopes: Scopes<'a>,
+    /// The location of the currently evaluated file.
+    pub path: Option<PathBuf>,
+    /// The stack of imported files that led to evaluation of the current file.
+    pub route: Vec<FileHash>,
     /// The active execution state.
     pub state: State,
-    /// Execution diagnostics.
+    /// Evaluation diagnostics.
     pub diags: DiagSet,
     /// The tree of finished page runs.
     tree: Tree,
@@ -24,10 +34,30 @@ pub struct ExecContext {
     stack: StackBuilder,
 }
 
-impl ExecContext {
-    /// Create a new execution context with a base state.
-    pub fn new(state: State) -> Self {
+impl<'a> EvalContext<'a> {
+    /// Create a new evaluation context with a base scope.
+    pub fn new(
+        loader: &'a mut dyn Loader,
+        cache: &'a mut Cache,
+        path: Option<&Path>,
+        scope: &'a Scope,
+        state: State,
+    ) -> Self {
+        let path = path.map(PathExt::normalize);
+
+        let mut route = vec![];
+        if let Some(path) = &path {
+            if let Some(hash) = loader.resolve(path) {
+                route.push(hash);
+            }
+        }
+
         Self {
+            loader,
+            cache,
+            scopes: Scopes::new(Some(scope)),
+            path,
+            route,
             diags: DiagSet::new(),
             tree: Tree { runs: vec![] },
             page: Some(PageBuilder::new(&state, true)),
@@ -36,9 +66,102 @@ impl ExecContext {
         }
     }
 
+    /// Resolve a path relative to the current file.
+    ///
+    /// Generates an error if the file is not found.
+    pub fn resolve(&mut self, path: &str, span: Span) -> Option<(PathBuf, FileHash)> {
+        let path = match &self.path {
+            Some(current) => current.parent()?.join(path),
+            None => PathBuf::from(path),
+        };
+
+        match self.loader.resolve(&path) {
+            Some(hash) => Some((path.normalize(), hash)),
+            None => {
+                self.diag(error!(span, "file not found"));
+                None
+            }
+        }
+    }
+
+    /// Process an import of a module relative to the current location.
+    pub fn import(&mut self, path: &str, span: Span) -> Option<Scope> {
+        let (resolved, hash) = self.resolve(path, span)?;
+
+        // Prevent cyclic importing.
+        if self.route.contains(&hash) {
+            self.diag(error!(span, "cyclic import"));
+            return None;
+        }
+
+        let buffer = self.loader.load_file(&resolved).or_else(|| {
+            self.diag(error!(span, "failed to load file"));
+            None
+        })?;
+
+        let string = std::str::from_utf8(&buffer).ok().or_else(|| {
+            self.diag(error!(span, "file is not valid utf-8"));
+            None
+        })?;
+
+        // Parse the file.
+        let parsed = parse(string);
+
+        // Prepare the new context.
+        let new_scopes = Scopes::new(self.scopes.base);
+        let old_scopes = mem::replace(&mut self.scopes, new_scopes);
+        let old_diags = mem::replace(&mut self.diags, parsed.diags);
+        let old_path = mem::replace(&mut self.path, Some(resolved));
+        self.route.push(hash);
+
+        // Evaluate the module.
+        parsed.output.show(self);
+
+        // Restore the old context.
+        let new_scopes = mem::replace(&mut self.scopes, old_scopes);
+        let new_diags = mem::replace(&mut self.diags, old_diags);
+        self.path = old_path;
+        self.route.pop();
+
+        // Put all diagnostics from the module on the import.
+        for mut diag in new_diags {
+            diag.span = span;
+            self.diag(diag);
+        }
+
+        Some(new_scopes.top)
+    }
+
     /// Add a diagnostic.
     pub fn diag(&mut self, diag: Diag) {
         self.diags.insert(diag);
+    }
+
+    /// Cast a value to a type and diagnose a possible error / warning.
+    pub fn cast<T>(&mut self, value: Value, span: Span) -> Option<T>
+    where
+        T: Cast<Value>,
+    {
+        if value == Value::Error {
+            return None;
+        }
+
+        match T::cast(value) {
+            CastResult::Ok(t) => Some(t),
+            CastResult::Warn(t, m) => {
+                self.diag(warning!(span, "{}", m));
+                Some(t)
+            }
+            CastResult::Err(value) => {
+                self.diag(error!(
+                    span,
+                    "expected {}, found {}",
+                    T::TYPE_NAME,
+                    value.type_name(),
+                ));
+                None
+            }
+        }
     }
 
     /// Set the font to monospace.
@@ -48,12 +171,12 @@ impl ExecContext {
     }
 
     /// Execute a template and return the result as a stack node.
-    pub fn exec_template(&mut self, template: &TemplateValue) -> StackNode {
+    pub fn show_template(&mut self, template: &TemplateValue) -> StackNode {
         let snapshot = self.state.clone();
         let page = self.page.take();
         let stack = mem::replace(&mut self.stack, StackBuilder::new(&self.state));
 
-        template.exec(self);
+        template.show(self);
 
         self.state = snapshot;
         self.page = page;

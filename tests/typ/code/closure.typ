@@ -25,14 +25,18 @@
     let greet = {
         let hi = "Hi"
         name => {
+            // Can't assign to captured variables.
+            // Error: 13-17 cannot assign to a constant
+            mark = "!"
             hi + ", " + name + mark
         }
     }
 
     test(greet("Typst"), "Hi, Typst?")
 
+    // Variables are captured by value.
     mark = "!"
-    test(greet("Typst"), "Hi, Typst!")
+    test(greet("Typst"), "Hi, Typst?")
 }
 
 // Don't leak environment.

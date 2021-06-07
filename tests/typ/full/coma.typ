@@ -14,14 +14,16 @@
 // the only argument to a function is a template, the parentheses can be omitted
 // (i.e. `f[a]` is the same as `f([a])`).
 #rect[
-    // Backslash adds a forced line break.
-    #university \
-    #faculty \
-    Sekretariat MA \
-    Dr. Max Mustermann \
-    Ola Nordmann, John Doe
+  // Backslash adds a forced line break.
+  #university \
+  #faculty \
+  Sekretariat MA \
+  Dr. Max Mustermann \
+  Ola Nordmann, John Doe
 ]
-#align(right, rect[*WiSe 2019/2020* \ Woche 3])
+#align(right)[
+  #rect[*WiSe 2019/2020* \ Woche 3]
+]
 
 // Adds vertical spacing.
 #v(6mm)
@@ -29,10 +31,10 @@
 // If the last argument to a function is a template, we can also place it behind
 // the parentheses.
 #align(center)[
-    // Markdown-like syntax for headings.
-    ==== 3. Übungsblatt Computerorientierte Mathematik II #v(4mm)
-    *Abgabe: 03.05.2019* (bis 10:10 Uhr in MA 001) #v(4mm)
-    *Alle Antworten sind zu beweisen.*
+  // Markdown-like syntax for headings.
+  ==== 3. Übungsblatt Computerorientierte Mathematik II #v(4mm)
+  *Abgabe: 03.05.2019* (bis 10:10 Uhr in MA 001) #v(4mm)
+  *Alle Antworten sind zu beweisen.*
 ]
 
 *1. Aufgabe* #align(right)[(1 + 1 + 2 Punkte)]
@@ -46,4 +48,6 @@ von _v_ zu einem Blatt. Die Höhe des Baumes ist die Höhe der Wurzel.
 
 // The `image` function returns a "template" value of the same type as
 // the `[...]` literals.
-#align(center, image("../../res/graph.png", width: 75%))
+#align(center)[
+  #image("../../res/graph.png", width: 75%)
+]

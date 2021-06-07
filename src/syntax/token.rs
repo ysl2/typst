@@ -90,8 +90,6 @@ pub enum Token<'s> {
     Return,
     /// The `import` keyword.
     Import,
-    /// The `include` keyword.
-    Include,
     /// The `using` keyword.
     Using,
     /// One or more whitespace characters.
@@ -235,7 +233,6 @@ impl<'s> Token<'s> {
             Self::Continue => "keyword `continue`",
             Self::Return => "keyword `return`",
             Self::Import => "keyword `import`",
-            Self::Include => "keyword `include`",
             Self::Using => "keyword `using`",
             Self::Space(_) => "space",
             Self::Text(_) => "text",

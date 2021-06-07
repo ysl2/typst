@@ -6,12 +6,9 @@
 //!   tree]. The structures describing the tree can be found in the [syntax]
 //!   module.
 //! - **Evaluation:** The next step is to [evaluate] the syntax tree. This
-//!   computes the value of each node in the document and produces a [module].
-//! - **Execution:** Now, we can [execute] the parsed and evaluated module.
-//!   This produces a [layout tree], a high-level, fully styled representation
-//!   of the document. The nodes of this tree are self-contained and
-//!   order-independent and thus much better suited for layouting than the
-//!   syntax tree.
+//!   produces a [layout tree], a high-level, fully styled representation of the
+//!   document. The nodes of this tree are self-contained and order-independent
+//!   and thus much better suited for layouting than the syntax tree.
 //! - **Layouting:** Next, the tree is [layouted] into a portable version of the
 //!   typeset document. The output of this is a collection of [`Frame`]s (one
 //!   per page), ready for exporting.
@@ -22,8 +19,6 @@
 //! [parsed]: parse::parse
 //! [syntax tree]: syntax::Tree
 //! [evaluate]: eval::eval
-//! [module]: eval::Module
-//! [execute]: exec::exec
 //! [layout tree]: layout::Tree
 //! [layouted]: layout::layout
 //! [PDF]: export::pdf
@@ -34,7 +29,6 @@ pub mod diag;
 pub mod eval;
 pub mod cache;
 pub mod color;
-pub mod exec;
 pub mod export;
 pub mod font;
 pub mod geom;
@@ -49,12 +43,10 @@ pub mod syntax;
 pub mod util;
 
 use std::path::Path;
-use std::rc::Rc;
 
 use crate::cache::Cache;
 use crate::diag::Pass;
-use crate::eval::Scope;
-use crate::exec::State;
+use crate::eval::{State, Scope};
 use crate::layout::Frame;
 use crate::loading::Loader;
 
@@ -85,13 +77,11 @@ pub fn typeset(
     state: State,
 ) -> Pass<Vec<Frame>> {
     let parsed = parse::parse(src);
-    let evaluated = eval::eval(loader, cache, path, Rc::new(parsed.output), scope);
-    let executed = exec::exec(&evaluated.output.template, state);
-    let layouted = layout::layout(loader, cache, &executed.output);
+    let evaluated = eval::eval(loader, cache, path, &parsed.output, scope, state);
+    let layouted = layout::layout(loader, cache, &evaluated.output);
 
     let mut diags = parsed.diags;
     diags.extend(evaluated.diags);
-    diags.extend(executed.diags);
 
     Pass::new(layouted, diags)
 }

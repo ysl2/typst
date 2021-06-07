@@ -30,8 +30,8 @@ pub fn pad(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
         bottom.or(all).unwrap_or_default(),
     );
 
-    Value::template("pad", move |ctx| {
-        let child = ctx.exec_template(&body).into();
-        ctx.push(PadNode { padding, child });
-    })
+    let child = ctx.show_template(&body).into();
+    ctx.push(PadNode { padding, child });
+
+    Value::None
 }

@@ -1,15 +1,14 @@
 use std::any::Any;
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap};
 use std::fmt::{self, Debug, Display, Formatter};
 use std::ops::Deref;
 use std::rc::Rc;
 
-use super::EvalContext;
+use super::{EvalContext, Scope};
 use crate::color::{Color, RgbaColor};
-use crate::exec::ExecContext;
 use crate::geom::{Angle, Length, Linear, Relative};
-use crate::syntax::{Node, Span, Spanned, Tree};
+use crate::syntax::{Span, Spanned, Tree};
 
 /// A computational value.
 #[derive(Debug, Clone, PartialEq)]
@@ -49,22 +48,6 @@ pub enum Value {
 }
 
 impl Value {
-    /// Create a new template value consisting of a single dynamic node.
-    pub fn template<F>(name: impl Into<String>, f: F) -> Self
-    where
-        F: Fn(&mut ExecContext) + 'static,
-    {
-        Self::Template(vec![TemplateNode::Func(TemplateFunc::new(name, f))])
-    }
-
-    /// Try to cast the value into a specific type.
-    pub fn cast<T>(self) -> CastResult<T, Self>
-    where
-        T: Cast<Value>,
-    {
-        T::cast(self)
-    }
-
     /// The name of the stored value's type.
     pub fn type_name(&self) -> &'static str {
         match self {
@@ -85,6 +68,14 @@ impl Value {
             Self::Any(v) => v.type_name(),
             Self::Error => "error",
         }
+    }
+
+    /// Try to cast the value into a specific type.
+    pub fn cast<T>(self) -> CastResult<T, Self>
+    where
+        T: Cast<Value>,
+    {
+        T::cast(self)
     }
 
     /// Recursively compute whether two values are equal.
@@ -142,76 +133,20 @@ pub type TemplateValue = Vec<TemplateNode>;
 /// templates can yield multi-node templates.
 #[derive(Debug, Clone)]
 pub enum TemplateNode {
-    /// A template that consists of a syntax tree plus already evaluated
-    /// expression.
     Tree {
         /// The syntax tree of the corresponding template expression.
         tree: Rc<Tree>,
-        /// The evaluated expressions for the `tree`.
-        map: NodeMap,
+        /// The captured expressions for the `tree`.
+        captured: Scope,
     },
     /// A template that was converted from a string.
     Str(String),
-    /// A function template that can implement custom behaviour.
-    Func(TemplateFunc),
 }
 
 impl PartialEq for TemplateNode {
     fn eq(&self, _: &Self) -> bool {
         // TODO: Figure out what we want here.
         false
-    }
-}
-
-/// A map from nodes to the values they evaluated to.
-///
-/// The raw pointers point into the nodes contained in some [`Tree`]. Since the
-/// lifetime is erased, the tree could go out of scope while the hash map still
-/// lives. Although this could lead to lookup panics, it is not unsafe since the
-/// pointers are never dereferenced.
-pub type NodeMap = HashMap<*const Node, Value>;
-
-/// A reference-counted dynamic template node that can implement custom
-/// behaviour.
-#[derive(Clone)]
-pub struct TemplateFunc {
-    name: String,
-    f: Rc<dyn Fn(&mut ExecContext)>,
-}
-
-impl TemplateFunc {
-    /// Create a new function template from a rust function or closure.
-    pub fn new<F>(name: impl Into<String>, f: F) -> Self
-    where
-        F: Fn(&mut ExecContext) + 'static,
-    {
-        Self { name: name.into(), f: Rc::new(f) }
-    }
-
-    /// The name of the template node.
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-}
-
-impl PartialEq for TemplateFunc {
-    fn eq(&self, _: &Self) -> bool {
-        // TODO: Figure out what we want here.
-        false
-    }
-}
-
-impl Deref for TemplateFunc {
-    type Target = dyn Fn(&mut ExecContext);
-
-    fn deref(&self) -> &Self::Target {
-        self.f.as_ref()
-    }
-}
-
-impl Debug for TemplateFunc {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        f.debug_struct("TemplateAny").finish()
     }
 }
 

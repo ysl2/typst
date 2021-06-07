@@ -17,35 +17,10 @@ where
     p.finish()
 }
 
-/// Pretty print an item with a node map and return the resulting string.
-pub fn pretty_with_map<T>(item: &T, map: &NodeMap) -> String
-where
-    T: PrettyWithMap + ?Sized,
-{
-    let mut p = Printer::new();
-    item.pretty_with_map(&mut p, Some(map));
-    p.finish()
-}
-
 /// Pretty print an item.
 pub trait Pretty {
     /// Pretty print this item into the given printer.
     fn pretty(&self, p: &mut Printer);
-}
-
-/// Pretty print an item with a node map that applies to it.
-pub trait PrettyWithMap {
-    /// Pretty print this item into the given printer.
-    fn pretty_with_map(&self, p: &mut Printer, map: Option<&NodeMap>);
-}
-
-impl<T> Pretty for T
-where
-    T: PrettyWithMap,
-{
-    fn pretty(&self, p: &mut Printer) {
-        self.pretty_with_map(p, None);
-    }
 }
 
 /// A buffer into which items are printed.
@@ -103,16 +78,16 @@ impl Write for Printer {
     }
 }
 
-impl PrettyWithMap for Tree {
-    fn pretty_with_map(&self, p: &mut Printer, map: Option<&NodeMap>) {
+impl Pretty for Tree {
+    fn pretty(&self, p: &mut Printer) {
         for node in self {
-            node.pretty_with_map(p, map);
+            node.pretty(p);
         }
     }
 }
 
-impl PrettyWithMap for Node {
-    fn pretty_with_map(&self, p: &mut Printer, map: Option<&NodeMap>) {
+impl Pretty for Node {
+    fn pretty(&self, p: &mut Printer) {
         match self {
             // TODO: Handle escaping.
             Self::Text(text) => p.push_str(text),
@@ -121,29 +96,24 @@ impl PrettyWithMap for Node {
             Self::Emph(_) => p.push('_'),
             Self::Linebreak(_) => p.push_str(r"\"),
             Self::Parbreak(_) => p.push_str("\n\n"),
-            Self::Heading(heading) => heading.pretty_with_map(p, map),
+            Self::Heading(heading) => heading.pretty(p),
             Self::Raw(raw) => raw.pretty(p),
             Self::Expr(expr) => {
-                if let Some(map) = map {
-                    let value = &map[&(self as *const _)];
-                    value.pretty(p);
-                } else {
-                    if expr.has_short_form() {
-                        p.push('#');
-                    }
-                    expr.pretty(p);
+                if expr.has_short_form() {
+                    p.push('#');
                 }
+                expr.pretty(p);
             }
         }
     }
 }
 
-impl PrettyWithMap for HeadingNode {
-    fn pretty_with_map(&self, p: &mut Printer, map: Option<&NodeMap>) {
+impl Pretty for HeadingNode {
+    fn pretty(&self, p: &mut Printer) {
         for _ in 0 .. self.level {
             p.push('=');
         }
-        self.contents.pretty_with_map(p, map);
+        self.contents.pretty(p);
     }
 }
 
@@ -230,7 +200,6 @@ impl Pretty for Expr {
             Self::While(v) => v.pretty(p),
             Self::For(v) => v.pretty(p),
             Self::Import(v) => v.pretty(p),
-            Self::Include(v) => v.pretty(p),
         }
     }
 }
@@ -269,7 +238,7 @@ impl Pretty for Named {
 impl Pretty for TemplateExpr {
     fn pretty(&self, p: &mut Printer) {
         p.push('[');
-        self.tree.pretty_with_map(p, None);
+        self.tree.pretty(p);
         p.push(']');
     }
 }
@@ -454,13 +423,6 @@ impl Pretty for Imports {
     }
 }
 
-impl Pretty for IncludeExpr {
-    fn pretty(&self, p: &mut Printer) {
-        p.push_str("include ");
-        self.path.pretty(p);
-    }
-}
-
 impl Pretty for Ident {
     fn pretty(&self, p: &mut Printer) {
         p.push_str(self.as_str());
@@ -531,18 +493,9 @@ impl Pretty for TemplateValue {
 impl Pretty for TemplateNode {
     fn pretty(&self, p: &mut Printer) {
         match self {
-            Self::Tree { tree, map } => tree.pretty_with_map(p, Some(map)),
+            Self::Tree { tree, .. } => tree.pretty(p),
             Self::Str(s) => p.push_str(s),
-            Self::Func(func) => func.pretty(p),
         }
-    }
-}
-
-impl Pretty for TemplateFunc {
-    fn pretty(&self, p: &mut Printer) {
-        p.push_str("<node ");
-        p.push_str(self.name());
-        p.push('>');
     }
 }
 
@@ -627,7 +580,7 @@ pretty_display! {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::BTreeMap;
     use std::rc::Rc;
 
     use super::*;
@@ -787,11 +740,10 @@ mod tests {
             vec![
                 TemplateNode::Tree {
                     tree: Rc::new(vec![Node::Strong(Span::ZERO)]),
-                    map: HashMap::new(),
+                    captured: Scope::new(),
                 },
-                TemplateNode::Func(TemplateFunc::new("example", |_| {})),
             ],
-            "[*<node example>]",
+            "[*]",
         );
 
         // Function.

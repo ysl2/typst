@@ -88,7 +88,6 @@ visit! {
             Expr::While(e) => v.visit_while(e),
             Expr::For(e) => v.visit_for(e),
             Expr::Import(e) => v.visit_import(e),
-            Expr::Include(e) => v.visit_include(e),
         }
     }
 
@@ -199,9 +198,5 @@ visit! {
                 v.visit_binding(ident);
             }
         }
-    }
-
-    fn visit_include(v, node: &IncludeExpr) {
-        v.visit_expr(&node.path);
     }
 }

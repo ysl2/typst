@@ -34,8 +34,7 @@ pub use stack::*;
 use std::fmt::{self, Display, Formatter};
 
 use crate::color::RgbaColor;
-use crate::eval::{EvalContext, FuncArgs, Scope, TemplateValue, Value};
-use crate::exec::{Exec, FontFamily};
+use crate::eval::{Show, FontFamily, EvalContext, FuncArgs, Scope, TemplateValue, Value};
 use crate::font::{FontStyle, FontWeight, VerticalFontMetric};
 use crate::geom::*;
 use crate::syntax::{Node, Spanned};

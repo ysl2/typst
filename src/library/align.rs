@@ -42,25 +42,25 @@ pub fn align(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
         }
     }
 
-    Value::template("align", move |ctx| {
-        let snapshot = ctx.state.clone();
+    let snapshot = ctx.state.clone();
 
-        if let Some(horizontal) = horizontal {
-            ctx.state.aligns.cross = horizontal.to_align(ctx.state.lang.dir);
-        }
+    if let Some(horizontal) = horizontal {
+        ctx.state.aligns.cross = horizontal.to_align(ctx.state.lang.dir);
+    }
 
-        if let Some(vertical) = vertical {
-            ctx.state.aligns.main = vertical.to_align(Dir::TTB);
-            if ctx.state.aligns.main != snapshot.aligns.main {
-                ctx.parbreak();
-            }
+    if let Some(vertical) = vertical {
+        ctx.state.aligns.main = vertical.to_align(Dir::TTB);
+        if ctx.state.aligns.main != snapshot.aligns.main {
+            ctx.parbreak();
         }
+    }
 
-        if let Some(body) = &body {
-            body.exec(ctx);
-            ctx.state = snapshot;
-        }
-    })
+    if let Some(body) = &body {
+        body.show(ctx);
+        ctx.state = snapshot;
+    }
+
+    Value::None
 }
 
 /// An alignment specifier passed to `align`.

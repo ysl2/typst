@@ -25,7 +25,7 @@ All none
 // Evaluates to concatenation of for loop bodies.
 {
     let parts = ("Hel", "lo")
-    for s in parts [{s}]
+    for s in parts {s}
 }
 
 ---

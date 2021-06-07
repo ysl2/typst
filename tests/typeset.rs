@@ -16,8 +16,7 @@ use walkdir::WalkDir;
 use typst::cache::Cache;
 use typst::color;
 use typst::diag::{Diag, DiagSet, Level};
-use typst::eval::{EvalContext, FuncArgs, FuncValue, Scope, Value};
-use typst::exec::State;
+use typst::eval::{State, EvalContext, FuncArgs, FuncValue, Scope, Value};
 use typst::geom::{self, Length, Point, Sides, Size};
 use typst::image::ImageId;
 use typst::layout::{Element, Fill, Frame, Shape, Text};
@@ -311,15 +310,14 @@ fn parse_metadata(src: &str, map: &LineMap) -> (Option<bool>, DiagSet) {
 }
 
 fn register_helpers(scope: &mut Scope, panics: Rc<RefCell<Vec<Panic>>>) {
-    pub fn args(_: &mut EvalContext, args: &mut FuncArgs) -> Value {
+    pub fn args(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
+        let snapshot = ctx.state.clone();
         let repr = typst::pretty::pretty(args);
         args.items.clear();
-        Value::template("args", move |ctx| {
-            let snapshot = ctx.state.clone();
-            ctx.set_monospace();
-            ctx.push_text(&repr);
-            ctx.state = snapshot;
-        })
+        ctx.set_monospace();
+        ctx.push_text(&repr);
+        ctx.state = snapshot;
+        Value::None
     }
 
     let test = move |ctx: &mut EvalContext, args: &mut FuncArgs| -> Value {

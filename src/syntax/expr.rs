@@ -58,8 +58,6 @@ pub enum Expr {
     For(ForExpr),
     /// An import expression: `import "utils.typ" using a, b, c`.
     Import(ImportExpr),
-    /// An include expression: `include "chapter1.typ"`.
-    Include(IncludeExpr),
 }
 
 impl Expr {
@@ -90,7 +88,6 @@ impl Expr {
             Self::While(ref v) => v.span,
             Self::For(ref v) => v.span,
             Self::Import(ref v) => v.span,
-            Self::Include(ref v) => v.span,
         }
     }
 
@@ -456,15 +453,6 @@ pub enum Imports {
     Wildcard,
     /// The specified identifiers from the file should be imported.
     Idents(Vec<Ident>),
-}
-
-/// An include expression: `include "chapter1.typ"`.
-#[derive(Debug, Clone, PartialEq)]
-pub struct IncludeExpr {
-    /// The source code location.
-    pub span: Span,
-    /// The location of the file to be included.
-    pub path: Box<Expr>,
 }
 
 /// An if-else expression: `if x { y } else { z }`.

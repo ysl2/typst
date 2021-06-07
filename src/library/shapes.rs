@@ -23,7 +23,7 @@ pub fn rect(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
     let height = args.eat_named(ctx, "height");
     let fill = args.eat_named(ctx, "fill");
     let body = args.eat::<TemplateValue>(ctx).unwrap_or_default();
-    rect_impl("rect", width, height, None, fill, body)
+    rect_impl(ctx, width, height, None, fill, body)
 }
 
 /// `square`: A square with optional content.
@@ -49,33 +49,33 @@ pub fn square(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
     let height = width.is_none().then(|| args.eat_named(ctx, "height")).flatten();
     let fill = args.eat_named(ctx, "fill");
     let body = args.eat::<TemplateValue>(ctx).unwrap_or_default();
-    rect_impl("square", width, height, Some(N64::from(1.0)), fill, body)
+    rect_impl(ctx, width, height, Some(N64::from(1.0)), fill, body)
 }
 
 fn rect_impl(
-    name: &str,
+    ctx: &mut EvalContext,
     width: Option<Linear>,
     height: Option<Linear>,
     aspect: Option<N64>,
     fill: Option<Color>,
     body: TemplateValue,
 ) -> Value {
-    Value::template(name, move |ctx| {
-        let mut stack = ctx.exec_template(&body);
-        stack.aspect = aspect;
+    let mut stack = ctx.show_template(&body);
+    stack.aspect = aspect;
 
-        let fixed = FixedNode { width, height, child: stack.into() };
+    let fixed = FixedNode { width, height, child: stack.into() };
 
-        if let Some(color) = fill {
-            ctx.push(BackgroundNode {
-                shape: BackgroundShape::Rect,
-                fill: Fill::Color(color),
-                child: fixed.into(),
-            });
-        } else {
-            ctx.push(fixed);
-        }
-    })
+    if let Some(color) = fill {
+        ctx.push(BackgroundNode {
+            shape: BackgroundShape::Rect,
+            fill: Fill::Color(color),
+            child: fixed.into(),
+        });
+    } else {
+        ctx.push(fixed);
+    }
+
+    Value::None
 }
 
 /// `ellipse`: An ellipse with optional content.
@@ -95,7 +95,7 @@ pub fn ellipse(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
     let height = args.eat_named(ctx, "height");
     let fill = args.eat_named(ctx, "fill");
     let body = args.eat::<TemplateValue>(ctx).unwrap_or_default();
-    ellipse_impl("ellipse", width, height, None, fill, body)
+    ellipse_impl(ctx, width, height, None, fill, body)
 }
 
 /// `circle`: A circle with optional content.
@@ -121,43 +121,43 @@ pub fn circle(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
     let height = width.is_none().then(|| args.eat_named(ctx, "height")).flatten();
     let fill = args.eat_named(ctx, "fill");
     let body = args.eat::<TemplateValue>(ctx).unwrap_or_default();
-    ellipse_impl("circle", width, height, Some(N64::from(1.0)), fill, body)
+    ellipse_impl(ctx, width, height, Some(N64::from(1.0)), fill, body)
 }
 
 fn ellipse_impl(
-    name: &str,
+    ctx: &mut EvalContext,
     width: Option<Linear>,
     height: Option<Linear>,
     aspect: Option<N64>,
     fill: Option<Color>,
     body: TemplateValue,
 ) -> Value {
-    Value::template(name, move |ctx| {
-        // This padding ratio ensures that the rectangular padded region fits
-        // perfectly into the ellipse.
-        const PAD: f64 = 0.5 - SQRT_2 / 4.0;
+    // This padding ratio ensures that the rectangular padded region fits
+    // perfectly into the ellipse.
+    const PAD: f64 = 0.5 - SQRT_2 / 4.0;
 
-        let mut stack = ctx.exec_template(&body);
-        stack.aspect = aspect;
+    let mut stack = ctx.show_template(&body);
+    stack.aspect = aspect;
 
-        let fixed = FixedNode {
-            width,
-            height,
-            child: PadNode {
-                padding: Sides::splat(Relative::new(PAD).into()),
-                child: stack.into(),
-            }
-            .into(),
-        };
-
-        if let Some(color) = fill {
-            ctx.push(BackgroundNode {
-                shape: BackgroundShape::Ellipse,
-                fill: Fill::Color(color),
-                child: fixed.into(),
-            });
-        } else {
-            ctx.push(fixed);
+    let fixed = FixedNode {
+        width,
+        height,
+        child: PadNode {
+            padding: Sides::splat(Relative::new(PAD).into()),
+            child: stack.into(),
         }
-    })
+        .into(),
+    };
+
+    if let Some(color) = fill {
+        ctx.push(BackgroundNode {
+            shape: BackgroundShape::Ellipse,
+            fill: Fill::Color(color),
+            child: fixed.into(),
+        });
+    } else {
+        ctx.push(fixed);
+    }
+
+    Value::None
 }

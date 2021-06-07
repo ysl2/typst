@@ -14,19 +14,19 @@ pub fn par(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
     let leading = args.eat_named(ctx, "leading");
     let word_spacing = args.eat_named(ctx, "word-spacing");
 
-    Value::template("par", move |ctx| {
-        if let Some(spacing) = spacing {
-            ctx.state.par.spacing = spacing;
-        }
+    if let Some(spacing) = spacing {
+        ctx.state.par.spacing = spacing;
+    }
 
-        if let Some(leading) = leading {
-            ctx.state.par.leading = leading;
-        }
+    if let Some(leading) = leading {
+        ctx.state.par.leading = leading;
+    }
 
-        if let Some(word_spacing) = word_spacing {
-            ctx.state.par.word_spacing = word_spacing;
-        }
+    if let Some(word_spacing) = word_spacing {
+        ctx.state.par.word_spacing = word_spacing;
+    }
 
-        ctx.parbreak();
-    })
+    ctx.parbreak();
+
+    Value::None
 }

@@ -22,16 +22,12 @@ A#if true [B] #else [] C
 ---
 // Spacing around while loop.
 
-#let c = true; A#while c [{c = false}B]C \
-#let c = true; A#while c [{c = false}B] C \
 #let c = true; A #while c { c = false; "B" }C \
 #let c = true; A #while c { c = false; "B" } C
 
 ---
 // Spacing around for loop.
 
-A#for _ in (none,) [B]C  \
-A#for _ in (none,) [B] C \
 A #for _ in (none,) {"B"}C
 
 ---

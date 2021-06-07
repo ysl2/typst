@@ -62,63 +62,63 @@ pub fn font(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
     let monospace = args.eat_named(ctx, "monospace");
     let body = args.eat::<TemplateValue>(ctx);
 
-    Value::template("font", move |ctx| {
-        let snapshot = ctx.state.clone();
+    let snapshot = ctx.state.clone();
 
-        if let Some(linear) = size {
-            if linear.rel.is_zero() {
-                ctx.state.font.size = linear.abs;
-                ctx.state.font.scale = Linear::one();
-            } else {
-                ctx.state.font.scale = linear;
-            }
+    if let Some(linear) = size {
+        if linear.rel.is_zero() {
+            ctx.state.font.size = linear.abs;
+            ctx.state.font.scale = Linear::one();
+        } else {
+            ctx.state.font.scale = linear;
         }
+    }
 
-        if !list.is_empty() {
-            ctx.state.font.families_mut().list = list.clone();
-        }
+    if !list.is_empty() {
+        ctx.state.font.families_mut().list = list.clone();
+    }
 
-        if let Some(style) = style {
-            ctx.state.font.variant.style = style;
-        }
+    if let Some(style) = style {
+        ctx.state.font.variant.style = style;
+    }
 
-        if let Some(weight) = weight {
-            ctx.state.font.variant.weight = weight;
-        }
+    if let Some(weight) = weight {
+        ctx.state.font.variant.weight = weight;
+    }
 
-        if let Some(stretch) = stretch {
-            ctx.state.font.variant.stretch = stretch;
-        }
+    if let Some(stretch) = stretch {
+        ctx.state.font.variant.stretch = stretch;
+    }
 
-        if let Some(top_edge) = top_edge {
-            ctx.state.font.top_edge = top_edge;
-        }
+    if let Some(top_edge) = top_edge {
+        ctx.state.font.top_edge = top_edge;
+    }
 
-        if let Some(bottom_edge) = bottom_edge {
-            ctx.state.font.bottom_edge = bottom_edge;
-        }
+    if let Some(bottom_edge) = bottom_edge {
+        ctx.state.font.bottom_edge = bottom_edge;
+    }
 
-        if let Some(color) = color {
-            ctx.state.font.color = Fill::Color(color);
-        }
+    if let Some(color) = color {
+        ctx.state.font.color = Fill::Color(color);
+    }
 
-        if let Some(FontFamilies(serif)) = &serif {
-            ctx.state.font.families_mut().serif = serif.clone();
-        }
+    if let Some(FontFamilies(serif)) = &serif {
+        ctx.state.font.families_mut().serif = serif.clone();
+    }
 
-        if let Some(FontFamilies(sans_serif)) = &sans_serif {
-            ctx.state.font.families_mut().sans_serif = sans_serif.clone();
-        }
+    if let Some(FontFamilies(sans_serif)) = &sans_serif {
+        ctx.state.font.families_mut().sans_serif = sans_serif.clone();
+    }
 
-        if let Some(FontFamilies(monospace)) = &monospace {
-            ctx.state.font.families_mut().monospace = monospace.clone();
-        }
+    if let Some(FontFamilies(monospace)) = &monospace {
+        ctx.state.font.families_mut().monospace = monospace.clone();
+    }
 
-        if let Some(body) = &body {
-            body.exec(ctx);
-            ctx.state = snapshot;
-        }
-    })
+    if let Some(body) = &body {
+        body.show(ctx);
+        ctx.state = snapshot;
+    }
+
+    Value::None
 }
 
 /// A list of font family names.
