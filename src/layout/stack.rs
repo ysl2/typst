@@ -3,14 +3,14 @@ use decorum::N64;
 use super::*;
 
 /// A node that stacks its children.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "layout-cache", derive(Hash))]
 pub struct StackNode {
     /// The `main` and `cross` directions of this stack.
     ///
     /// The children are stacked along the `main` direction. The `cross`
     /// direction is required for aligning the children.
-    pub dirs: Gen<Dir>,
+    pub dirs: Gen<Option<Dir>>,
     /// The fixed aspect ratio between width and height, if any.
     ///
     /// The resulting frames will satisfy `width = aspect * height`.
@@ -23,10 +23,48 @@ pub struct StackNode {
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "layout-cache", derive(Hash))]
 pub enum StackChild {
-    /// Spacing between other nodes.
-    Spacing(Length),
     /// Any child node and how to align it in the stack.
-    Any(LayoutNode, Gen<Align>),
+    Node(LayoutNode, Gen<Option<Align>>),
+    /// Spacing between other nodes.
+    Spacing(Option<Linear>, bool),
+}
+
+impl StackNode {
+    /// Create a new, empty stack.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether the stack has no children.
+    pub fn is_empty(&self) -> bool {
+        self.children.is_empty()
+    }
+
+    /// Insert an arbitrary layoutable node.
+    pub fn push_node(&mut self, node: impl Into<LayoutNode>, aligns: Gen<Option<Align>>) {
+        self.children.push(StackChild::Node(node.into(), aligns));
+    }
+
+    /// Insert soft spacing that is removed if it's at the start or end of the
+    /// paragraph or if it's consumed by adjacent hard spacing.
+    pub fn push_soft_spacing(&mut self, spacing: Option<Linear>) {
+        if matches!(self.children.last(), Some(StackChild::Node(..))) {
+            self.children.push(StackChild::Spacing(spacing, false));
+        }
+    }
+
+    /// Insert hard spacing that eats surrounding soft spacing.
+    pub fn push_hard_spacing(&mut self, spacing: Length) {
+        self.trim();
+        self.children.push(StackChild::Spacing(Some(spacing.into()), true));
+    }
+
+    /// Remove trailing soft spacing.
+    pub fn trim(&mut self) {
+        if matches!(self.children.last(), Some(StackChild::Spacing(_, false))) {
+            self.children.pop();
+        }
+    }
 }
 
 impl Layout for StackNode {
@@ -35,7 +73,7 @@ impl Layout for StackNode {
         ctx: &mut LayoutContext,
         regions: &Regions,
     ) -> Vec<Constrained<Rc<Frame>>> {
-        StackLayouter::new(self, regions.clone()).layout(ctx)
+        StackLayouter::new(self, ctx, regions.clone()).layout(ctx)
     }
 }
 
@@ -47,12 +85,16 @@ impl From<StackNode> for LayoutNode {
 
 /// Performs stack layout.
 struct StackLayouter<'a> {
-    /// The stack node to layout.
-    stack: &'a StackNode,
+    /// The directions.
+    dirs: Gen<Dir>,
     /// The axis of the main direction.
     main: SpecAxis,
+    /// The fixed aspect ratio between width and height, if any.
+    aspect: Option<N64>,
     /// Whether the stack should expand to fill the region.
     expand: Spec<bool>,
+    /// The children of the stack.
+    children: &'a [StackChild],
     /// The region to layout into.
     regions: Regions,
     /// The full size of `regions.current` that was available before we started
@@ -75,23 +117,26 @@ struct StackLayouter<'a> {
 
 impl<'a> StackLayouter<'a> {
     /// Create a new stack layouter.
-    fn new(stack: &'a StackNode, mut regions: Regions) -> Self {
-        let main = stack.dirs.main.axis();
-        let full = regions.current;
-        let expand = regions.expand;
+    fn new(stack: &'a StackNode, ctx: &LayoutContext, mut regions: Regions) -> Self {
+        let dirs = stack.dirs.unwrap_or(ctx.defaults.dirs);
+        let main = dirs.main.axis();
 
         // Disable expansion on the main axis for children.
+        let expand = regions.expand;
         regions.expand.set(main, false);
 
+        let full = regions.current;
         if let Some(aspect) = stack.aspect {
             regions.current = regions.current.with_aspect(aspect.into_inner());
         }
 
         Self {
-            stack,
+            dirs,
             main,
+            aspect: stack.aspect,
             expand,
             regions,
+            children: &stack.children,
             full,
             used: Gen::zero(),
             ruler: Align::Start,
@@ -104,19 +149,26 @@ impl<'a> StackLayouter<'a> {
 
     /// Layout all children.
     fn layout(mut self, ctx: &mut LayoutContext) -> Vec<Constrained<Rc<Frame>>> {
-        for child in &self.stack.children {
+        for child in self.children {
             match *child {
-                StackChild::Spacing(amount) => self.space(amount),
-                StackChild::Any(ref node, aligns) => {
+                StackChild::Node(ref node, aligns) => {
                     let nodes = node.layout(ctx, &self.regions);
                     let len = nodes.len();
                     for (i, frame) in nodes.into_iter().enumerate() {
                         if i + 1 != len {
                             self.constraints.exact = self.full.to_spec().map(Some);
                         }
-                        self.push_frame(frame.item, aligns);
+                        self.push_frame(
+                            frame.item,
+                            aligns.unwrap_or(ctx.defaults.aligns),
+                        );
                     }
                 }
+                StackChild::Spacing(spacing, _) => self.space(
+                    spacing
+                        .unwrap_or(ctx.defaults.par_spacing)
+                        .resolve(ctx.defaults.font_size),
+                ),
             }
         }
 
@@ -157,6 +209,7 @@ impl<'a> StackLayouter<'a> {
                 .max
                 .get_mut(self.main)
                 .set_min(self.used.main + size.main);
+
             self.finish_region();
         }
 
@@ -198,7 +251,7 @@ impl<'a> StackLayouter<'a> {
         );
 
         // Make sure the stack's size satisfies the aspect ratio.
-        if let Some(aspect) = self.stack.aspect {
+        if let Some(aspect) = self.aspect {
             self.constraints.exact = self.full.to_spec().map(Some);
             self.constraints.min = Spec::splat(None);
             self.constraints.max = Spec::splat(None);
@@ -227,14 +280,14 @@ impl<'a> StackLayouter<'a> {
 
             // Align along the cross axis.
             let cross = aligns.cross.resolve(
-                self.stack.dirs.cross,
+                self.dirs.cross,
                 Length::zero() .. stack_size.cross - child_size.cross,
             );
 
             // Align along the main axis.
             let main = aligns.main.resolve(
-                self.stack.dirs.main,
-                if self.stack.dirs.main.is_positive() {
+                self.dirs.main,
+                if self.dirs.main.is_positive() {
                     offset .. stack_size.main - self.used.main + offset
                 } else {
                     let offset_with_self = offset + child_size.main;
@@ -255,11 +308,12 @@ impl<'a> StackLayouter<'a> {
         }
 
         self.regions.next();
-        if let Some(aspect) = self.stack.aspect {
+        self.full = self.regions.current;
+
+        if let Some(aspect) = self.aspect {
             self.regions.current = self.regions.current.with_aspect(aspect.into_inner());
         }
 
-        self.full = self.regions.current;
         self.used = Gen::zero();
         self.ruler = Align::Start;
         self.finished.push(output.constrain(self.constraints));

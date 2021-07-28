@@ -4,6 +4,70 @@ use std::cmp::Ordering;
 use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
 
+/// Additional methods for options.
+pub trait OptionExt<T> {
+    /// Replace `self` if `self` is `Some`.
+    fn and_set(&mut self, other: Option<T>);
+
+    /// Replace `self` if `other` is `None`.
+    fn or_set(&mut self, other: Option<T>);
+
+    /// Replace `self` if `other` is `Some`.
+    fn set_if(&mut self, other: Option<T>);
+
+    /// Sets `other` as the value if `self` is `None` or if it contains a
+    /// value larger than `other`.
+    fn set_min(&mut self, other: T)
+    where
+        T: Ord;
+
+    /// Sets `other` as the value if `self` is `None` or if it contains a
+    /// value smaller than `other`.
+    fn set_max(&mut self, other: T)
+    where
+        T: Ord;
+}
+
+impl<T> OptionExt<T> for Option<T> {
+    fn and_set(&mut self, other: Option<T>) {
+        if self.is_some() {
+            *self = other;
+        }
+    }
+
+    fn or_set(&mut self, other: Option<T>) {
+        if self.is_none() {
+            *self = other;
+        }
+    }
+
+    fn set_if(&mut self, other: Option<T>) {
+        if other.is_some() {
+            *self = other;
+        }
+    }
+
+    fn set_min(&mut self, other: T)
+    where
+        T: Ord,
+    {
+        match self {
+            Some(x) => *x = std::cmp::min(*x, other),
+            None => *self = Some(other),
+        }
+    }
+
+    fn set_max(&mut self, other: T)
+    where
+        T: Ord,
+    {
+        match self {
+            Some(x) => *x = std::cmp::max(*x, other),
+            None => *self = Some(other),
+        }
+    }
+}
+
 /// Additional methods for slices.
 pub trait SliceExt<T> {
     /// Split a slice into consecutive groups with the same key.

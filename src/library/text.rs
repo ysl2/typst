@@ -1,13 +1,12 @@
-use std::convert::TryFrom;
-
-use crate::exec::{LineState, TextState};
-use crate::font::{FontStretch, FontStyle, FontWeight};
+use crate::eval::{LineState, TextState};
 use crate::layout::Paint;
 
 use super::*;
 
 /// `font`: Configure the font.
 pub fn font(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
+    let text = ctx.state.text_mut();
+
     let families: Vec<_> = args.all().collect();
     let list = if families.is_empty() {
         args.named(ctx, "family")
@@ -15,67 +14,31 @@ pub fn font(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
         Some(FontDef(families))
     };
 
-    let size = args.eat().or_else(|| args.named::<Linear>(ctx, "size"));
-    let style = args.named(ctx, "style");
-    let weight = args.named(ctx, "weight");
-    let stretch = args.named(ctx, "stretch");
-    let top_edge = args.named(ctx, "top-edge");
-    let bottom_edge = args.named(ctx, "bottom-edge");
-    let fill = args.named(ctx, "fill");
-    let serif = args.named(ctx, "serif");
-    let sans_serif = args.named(ctx, "sans-serif");
-    let monospace = args.named(ctx, "monospace");
-    let body = args.expect::<Template>(ctx, "body").unwrap_or_default();
+    if let Some(FontDef(list)) = list {
+        text.families_mut().list = Some(list);
+    }
 
-    Value::template(move |ctx| {
-        let state = ctx.state.text_mut();
+    if let Some(FamilyDef(serif)) = args.named(ctx, "serif") {
+        text.families_mut().serif = Some(Rc::new(serif));
+    }
 
-        if let Some(linear) = size {
-            state.size = linear.resolve(state.size);
-        }
+    if let Some(FamilyDef(sans_serif)) = args.named(ctx, "sans-serif") {
+        text.families_mut().sans_serif = Some(Rc::new(sans_serif));
+    }
 
-        if let Some(FontDef(list)) = &list {
-            state.families_mut().list = list.clone();
-        }
+    if let Some(FamilyDef(monospace)) = args.named(ctx, "monospace") {
+        text.families_mut().monospace = Some(Rc::new(monospace));
+    }
 
-        if let Some(style) = style {
-            state.variant.style = style;
-        }
+    text.size.set_if(args.eat().or_else(|| args.named(ctx, "size")));
+    text.style.set_if(args.named(ctx, "style"));
+    text.weight.set_if(args.named(ctx, "weight"));
+    text.stretch.set_if(args.named(ctx, "stretch"));
+    text.fill.set_if(args.named(ctx, "fill").map(Paint::Color));
+    text.top_edge.set_if(args.named(ctx, "top-edge"));
+    text.bottom_edge.set_if(args.named(ctx, "bottom-edge"));
 
-        if let Some(weight) = weight {
-            state.variant.weight = weight;
-        }
-
-        if let Some(stretch) = stretch {
-            state.variant.stretch = stretch;
-        }
-
-        if let Some(top_edge) = top_edge {
-            state.top_edge = top_edge;
-        }
-
-        if let Some(bottom_edge) = bottom_edge {
-            state.bottom_edge = bottom_edge;
-        }
-
-        if let Some(fill) = fill {
-            state.fill = Paint::Color(fill);
-        }
-
-        if let Some(FamilyDef(serif)) = &serif {
-            state.families_mut().serif = serif.clone();
-        }
-
-        if let Some(FamilyDef(sans_serif)) = &sans_serif {
-            state.families_mut().sans_serif = sans_serif.clone();
-        }
-
-        if let Some(FamilyDef(monospace)) = &monospace {
-            state.families_mut().monospace = monospace.clone();
-        }
-
-        body.exec(ctx);
-    })
+    Value::None
 }
 
 struct FontDef(Vec<FontFamily>);
@@ -104,79 +67,33 @@ castable! {
     ),
 }
 
-dynamic! {
-    FontFamily: "font family",
-    Value::Str(string) => Self::Named(string.to_lowercase()),
-}
-
-dynamic! {
-    FontStyle: "font style",
-}
-
-dynamic! {
-    FontWeight: "font weight",
-    Value::Int(number) => {
-        u16::try_from(number).map_or(Self::BLACK, Self::from_number)
-    },
-}
-
-dynamic! {
-    FontStretch: "font stretch",
-    Value::Relative(relative) => Self::from_ratio(relative.get() as f32),
-}
-
-dynamic! {
-    VerticalFontMetric: "vertical font metric",
-}
-
 /// `par`: Configure paragraphs.
 pub fn par(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
-    let par_spacing = args.named(ctx, "spacing");
-    let line_spacing = args.named(ctx, "leading");
-    let word_spacing = args.named(ctx, "word-spacing");
-    let body = args.expect::<Template>(ctx, "body").unwrap_or_default();
+    let text = ctx.state.text_mut();
 
-    Value::template(move |ctx| {
-        let state = ctx.state.text_mut();
+    text.par_spacing.set_if(args.named(ctx, "spacing"));
+    text.line_spacing.set_if(args.named(ctx, "leading"));
+    text.word_spacing.set_if(args.named(ctx, "word-spacing"));
+    ctx.template.push_parbreak(&ctx.state);
 
-        if let Some(par_spacing) = par_spacing {
-            state.par_spacing = par_spacing;
-        }
-
-        if let Some(line_spacing) = line_spacing {
-            state.line_spacing = line_spacing;
-        }
-
-        if let Some(word_spacing) = word_spacing {
-            state.word_spacing = word_spacing;
-        }
-
-        ctx.parbreak();
-        body.exec(ctx);
-    })
+    Value::None
 }
 
 /// `lang`: Configure the language.
 pub fn lang(ctx: &mut EvalContext, args: &mut FuncArgs) -> Value {
-    let iso = args.eat::<EcoString>().map(|s| lang_dir(&s));
-    let dir = match args.named::<Spanned<Dir>>(ctx, "dir") {
-        Some(dir) if dir.v.axis() == SpecAxis::Horizontal => Some(dir.v),
-        Some(dir) => {
-            ctx.diag(error!(dir.span, "must be horizontal"));
-            None
-        }
-        None => None,
-    };
-    let body = args.expect::<Template>(ctx, "body").unwrap_or_default();
+    let iso = args.eat::<EcoString>();
 
-    Value::template(move |ctx| {
-        if let Some(dir) = dir.or(iso) {
-            ctx.state.dir = dir;
+    if let Some(dir) = args.named::<Spanned<Dir>>(ctx, "dir") {
+        if dir.v.axis() == SpecAxis::Horizontal {
+            ctx.state.dir = Some(dir.v)
+        } else {
+            ctx.diag(error!(dir.span, "must be horizontal"))
         }
+    } else if let Some(iso) = iso {
+        ctx.state.dir = Some(lang_dir(&iso));
+    }
 
-        ctx.parbreak();
-        body.exec(ctx);
-    })
+    Value::None
 }
 
 /// The default direction for the language identified by `iso`.
@@ -209,23 +126,20 @@ fn line_impl(
     substate: fn(&mut TextState) -> &mut Option<Rc<LineState>>,
 ) -> Value {
     let stroke = args.eat().or_else(|| args.named(ctx, "stroke"));
-    let thickness = args.eat().or_else(|| args.named::<Linear>(ctx, "thickness"));
+    let thickness = args.eat().or_else(|| args.named(ctx, "thickness"));
     let offset = args.named(ctx, "offset");
     let extent = args.named(ctx, "extent").unwrap_or_default();
-    let body = args.expect::<Template>(ctx, "body").unwrap_or_default();
 
-    // Suppress any existing strikethrough if strength is explicitly zero.
-    let state = thickness.map_or(true, |s| !s.is_zero()).then(|| {
-        Rc::new(LineState {
-            stroke: stroke.map(Paint::Color),
-            thickness,
-            offset,
-            extent,
-        })
-    });
+    let mut state = State::default();
+    *substate(ctx.state.text_mut()) = Some(Rc::new(LineState {
+        stroke: stroke.map(Paint::Color),
+        thickness,
+        offset,
+        extent,
+    }));
 
-    Value::template(move |ctx| {
-        *substate(ctx.state.text_mut()) = state.clone();
-        body.exec(ctx);
-    })
+    let mut body: Template = args.expect(ctx, "body").unwrap_or_default();
+    body.apply(&state);
+
+    Value::Template(body)
 }

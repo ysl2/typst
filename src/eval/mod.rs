@@ -11,6 +11,7 @@ mod function;
 mod ops;
 mod scope;
 mod template;
+mod state;
 
 pub use array::*;
 pub use capture::*;
@@ -19,6 +20,7 @@ pub use function::*;
 pub use scope::*;
 pub use template::*;
 pub use value::*;
+pub use state::*;
 
 use std::collections::HashMap;
 use std::mem;
@@ -78,6 +80,8 @@ pub struct EvalContext<'a> {
     pub diags: DiagSet,
     /// The stack of imported files that led to evaluation of the current file.
     pub route: Vec<FileId>,
+    pub state: State,
+    pub template: Template,
 }
 
 impl<'a> EvalContext<'a> {
@@ -90,6 +94,8 @@ impl<'a> EvalContext<'a> {
             scopes: Scopes::new(Some(&ctx.std)),
             diags: DiagSet::new(),
             route: vec![file],
+            state: State::default(),
+            template: Template::new(),
         }
     }
 
@@ -200,21 +206,7 @@ impl Eval for Rc<SyntaxTree> {
     type Output = Template;
 
     fn eval(&self, ctx: &mut EvalContext) -> Self::Output {
-        struct ExprVisitor<'a, 'b> {
-            ctx: &'a mut EvalContext<'b>,
-            map: ExprMap,
-        }
-
-        impl<'ast> Visit<'ast> for ExprVisitor<'_, '_> {
-            fn visit_expr(&mut self, node: &'ast Expr) {
-                self.map.insert(node as *const _, node.eval(self.ctx));
-            }
-        }
-
-        let mut visitor = ExprVisitor { ctx, map: ExprMap::new() };
-        visitor.visit_tree(self);
-
-        TemplateTree { tree: Rc::clone(self), map: visitor.map }.into()
+        todo!()
     }
 }
 

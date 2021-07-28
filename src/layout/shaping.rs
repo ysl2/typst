@@ -5,7 +5,7 @@ use std::ops::Range;
 use rustybuzz::UnicodeBuffer;
 
 use super::{Element, Frame, Glyph, LayoutContext, Text};
-use crate::exec::{LineState, TextState};
+use crate::eval::{LineState, TextState};
 use crate::font::{Face, FaceId, FontVariant, LineMetrics};
 use crate::geom::{Dir, Length, Point, Size};
 use crate::layout::Geometry;
@@ -64,13 +64,14 @@ impl<'a> ShapedText<'a> {
         let mut frame = Frame::new(self.size, self.baseline);
         let mut offset = Length::zero();
 
+
         for (face_id, group) in self.glyphs.as_ref().group_by_key(|g| g.face_id) {
             let pos = Point::new(offset, self.baseline);
 
             let mut text = Text {
                 face_id,
-                size: self.state.size,
-                fill: self.state.fill,
+                size: self.state.size(&ctx.defaults),
+                fill: self.state.fill.unwrap_or(ctx.defaults.font_fill),
                 glyphs: vec![],
             };
 
@@ -195,9 +196,9 @@ pub fn shape<'a>(
             0,
             text,
             dir,
-            state.size,
-            state.variant(),
-            state.families(),
+            state.size(&ctx.defaults),
+            state.variant(&ctx.defaults),
+            state.families(&ctx.defaults),
             None,
         );
     }
@@ -351,16 +352,22 @@ fn measure(
     let mut width = Length::zero();
     let mut top = Length::zero();
     let mut bottom = Length::zero();
+
+    let size = state.size(&ctx.defaults);
+    let top_edge = state.top_edge.unwrap_or(ctx.defaults.top_edge);
+    let bottom_edge = state.bottom_edge.unwrap_or(ctx.defaults.bottom_edge);
+
     let mut expand_vertical = |face: &Face| {
-        top.set_max(face.vertical_metric(state.top_edge).to_length(state.size));
-        bottom.set_max(-face.vertical_metric(state.bottom_edge).to_length(state.size));
+        top.set_max(face.vertical_metric(top_edge).to_length(size));
+        bottom.set_max(-face.vertical_metric(bottom_edge).to_length(size));
     };
 
     if glyphs.is_empty() {
         // When there are no glyphs, we just use the vertical metrics of the
         // first available font.
-        for family in state.families() {
-            if let Some(face_id) = ctx.fonts.select(family, state.variant) {
+        let variant = state.variant(&ctx.defaults);
+        for family in state.families(&ctx.defaults) {
+            if let Some(face_id) = ctx.fonts.select(family, variant) {
                 expand_vertical(ctx.fonts.get(face_id));
                 break;
             }
@@ -390,20 +397,20 @@ fn decorate(
 ) {
     let mut apply = |substate: &LineState, metrics: fn(&Face) -> &LineMetrics| {
         let metrics = metrics(ctx.fonts.get(face_id));
-
-        let stroke = substate.stroke.unwrap_or(state.fill);
+        let stroke = substate.stroke.or(state.fill).unwrap_or(ctx.defaults.font_fill);
+        let size = state.size(&ctx.defaults);
 
         let thickness = substate
             .thickness
-            .map(|s| s.resolve(state.size))
-            .unwrap_or(metrics.strength.to_length(state.size));
+            .map(|s| s.resolve(size))
+            .unwrap_or(metrics.strength.to_length(size));
 
         let offset = substate
             .offset
-            .map(|s| s.resolve(state.size))
-            .unwrap_or(-metrics.position.to_length(state.size));
+            .map(|s| s.resolve(size))
+            .unwrap_or(-metrics.position.to_length(size));
 
-        let extent = substate.extent.resolve(state.size);
+        let extent = substate.extent.resolve(size);
 
         let pos = Point::new(pos.x - extent, pos.y + offset);
         let target = Point::new(width + 2.0 * extent, Length::zero());

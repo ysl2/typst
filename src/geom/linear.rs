@@ -36,6 +36,17 @@ impl Linear {
         self.rel.resolve(length) + self.abs
     }
 
+    /// Compose with another linear.
+    ///
+    /// This treats both linear's as mathematical functions and composes them.
+    /// The result is equivalent to `self . other` or `|x| self(other(x))`.
+    pub fn compose(self, other: Linear) -> Linear {
+        Self {
+            rel: self.rel * other.rel,
+            abs: self.rel.resolve(other.abs) + self.abs,
+        }
+    }
+
     /// Whether both parts are zero.
     pub fn is_zero(self) -> bool {
         self.rel.is_zero() && self.abs.is_zero()

@@ -34,7 +34,6 @@ pub mod diag;
 pub mod eval;
 pub mod color;
 pub mod eco;
-pub mod exec;
 pub mod export;
 pub mod font;
 pub mod geom;
@@ -51,8 +50,7 @@ pub mod util;
 use std::rc::Rc;
 
 use crate::diag::Pass;
-use crate::eval::{ModuleCache, Scope};
-use crate::exec::State;
+use crate::eval::{ModuleCache, Scope, Defaults};
 use crate::font::FontCache;
 use crate::image::ImageCache;
 use crate::layout::Frame;
@@ -62,8 +60,12 @@ use crate::loading::{FileId, Loader};
 
 /// The core context which holds the loader, configuration and cached artifacts.
 pub struct Context {
+    /// The standard library scope.
+    std: Scope,
+    /// The style defaults.
+    defaults: Defaults,
     /// The loader the context was created with.
-    pub loader: Rc<dyn Loader>,
+    loader: Rc<dyn Loader>,
     /// Caches parsed font faces.
     pub fonts: FontCache,
     /// Caches decoded images.
@@ -73,10 +75,6 @@ pub struct Context {
     /// Caches layouting artifacts.
     #[cfg(feature = "layout-cache")]
     pub layouts: LayoutCache,
-    /// The standard library scope.
-    std: Scope,
-    /// The default state.
-    state: State,
 }
 
 impl Context {
@@ -106,12 +104,10 @@ impl Context {
     pub fn typeset(&mut self, file: FileId, src: &str) -> Pass<Vec<Rc<Frame>>> {
         let ast = parse::parse(src);
         let module = eval::eval(self, file, Rc::new(ast.output));
-        let tree = exec::exec(self, &module.output.template);
-        let frames = layout::layout(self, &tree.output);
+        let frames = layout::layout(self, &module.output.template.into_tree());
 
         let mut diags = ast.diags;
         diags.extend(module.diags);
-        diags.extend(tree.diags);
 
         Pass::new(frames, diags)
     }
@@ -123,7 +119,7 @@ impl Context {
 #[derive(Default)]
 pub struct ContextBuilder {
     std: Option<Scope>,
-    state: Option<State>,
+    defaults: Option<Defaults>,
 }
 
 impl ContextBuilder {
@@ -134,9 +130,9 @@ impl ContextBuilder {
         self
     }
 
-    /// The initial properties for page size, font selection and so on.
-    pub fn state(mut self, state: State) -> Self {
-        self.state = Some(state);
+    /// The base properties for page size, font selection and so on.
+    pub fn defaults(mut self, defaults: Defaults) -> Self {
+        self.defaults = Some(defaults);
         self
     }
 
@@ -144,14 +140,14 @@ impl ContextBuilder {
     /// fonts, images, source files and other resources.
     pub fn build(self, loader: Rc<dyn Loader>) -> Context {
         Context {
+            std: self.std.unwrap_or(library::new()),
+            defaults: self.defaults.unwrap_or_default(),
             loader: Rc::clone(&loader),
             fonts: FontCache::new(Rc::clone(&loader)),
             images: ImageCache::new(loader),
             modules: ModuleCache::new(),
             #[cfg(feature = "layout-cache")]
             layouts: LayoutCache::new(),
-            std: self.std.unwrap_or(library::new()),
-            state: self.state.unwrap_or_default(),
         }
     }
 }

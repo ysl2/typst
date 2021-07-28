@@ -7,38 +7,59 @@ use std::fmt::{self, Debug, Formatter};
 use fxhash::FxHasher64;
 
 /// A tree of layout nodes.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct LayoutTree {
     /// Runs of pages with the same properties.
-    pub runs: Vec<PageRun>,
+    pub pages: Vec<PageNode>,
 }
 
 impl LayoutTree {
+    /// Create a new, empty layout tree.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether the tree has no children.
+    pub fn is_empty(&self) -> bool {
+        self.pages.is_empty()
+    }
+
+    /// Insert a page run.
+    pub fn push_page(&mut self, page: PageNode) {
+        self.pages.push(page);
+    }
+
     /// Layout the tree into a collection of frames.
     pub fn layout(&self, ctx: &mut LayoutContext) -> Vec<Rc<Frame>> {
-        self.runs.iter().flat_map(|run| run.layout(ctx)).collect()
+        self.pages.iter().flat_map(|run| run.layout(ctx)).collect()
     }
 }
 
 /// A run of pages that all have the same properties.
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct PageRun {
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
+pub struct PageNode {
+    /// The stack node that produces the actual pages.
+    pub stack: StackNode,
     /// The size of each page.
-    pub size: Size,
-    /// The layout node that produces the actual pages (typically a
-    /// [`StackNode`]).
-    pub child: LayoutNode,
+    pub size: Spec<Option<Length>>,
+    /// Whether the node should be kept even if the stack is empty.
+    pub hard: bool,
 }
 
-impl PageRun {
+impl PageNode {
+    /// Create a new, empty page.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether the page's stack has no children.
+    pub fn is_empty(&self) -> bool {
+        self.stack.is_empty()
+    }
+
     /// Layout the page run.
     pub fn layout(&self, ctx: &mut LayoutContext) -> Vec<Rc<Frame>> {
-        // When one of the lengths is infinite the page fits its content along
-        // that axis.
-        let Size { width, height } = self.size;
-        let expand = Spec::new(width.is_finite(), height.is_finite());
-        let regions = Regions::repeat(self.size, expand);
-        self.child.layout(ctx, &regions).into_iter().map(|c| c.item).collect()
+        todo!()
     }
 }
 

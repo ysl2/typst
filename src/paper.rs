@@ -6,7 +6,7 @@ use crate::geom::{Length, Linear, Relative, Sides, Size};
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Paper {
     /// The broad class this paper belongs to.
-    pub class: PaperClass,
+    class: PaperClass,
     /// The width of the paper in millimeters.
     width: f64,
     /// The height of the paper in millimeters.
@@ -19,6 +19,11 @@ impl Paper {
         parse_paper(name)
     }
 
+    /// The class of the paper.
+    pub fn class(self) -> PaperClass {
+        self.class
+    }
+
     /// The size of the paper.
     pub fn size(self) -> Size {
         Size::new(Length::mm(self.width), Length::mm(self.height))
@@ -28,7 +33,6 @@ impl Paper {
 /// Defines default margins for a class of related papers.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum PaperClass {
-    Custom,
     Base,
     US,
     Newspaper,
@@ -41,7 +45,6 @@ impl PaperClass {
         let f = |r| Relative::new(r).into();
         let s = |l, t, r, b| Sides::new(f(l), f(t), f(r), f(b));
         match self {
-            Self::Custom => s(0.1190, 0.0842, 0.1190, 0.0842),
             Self::Base => s(0.1190, 0.0842, 0.1190, 0.0842),
             Self::US => s(0.1760, 0.1092, 0.1760, 0.0910),
             Self::Newspaper => s(0.0455, 0.0587, 0.0455, 0.0294),

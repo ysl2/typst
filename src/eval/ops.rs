@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use super::Value;
+use super::{Template, Value};
 use Value::*;
 
 /// Join a value with another value.
@@ -14,9 +14,9 @@ pub fn join(lhs: Value, rhs: Value) -> Result<Value, Value> {
         (Str(a), Str(b)) => Str(a + &b),
         (Array(a), Array(b)) => Array(a + &b),
         (Dict(a), Dict(b)) => Dict(a + &b),
-        (Template(a), Template(b)) => Template(a + &b),
-        (Template(a), Str(b)) => Template(a + b),
-        (Str(a), Template(b)) => Template(a + b),
+        (Template(a), Template(b)) => Template(a + b),
+        (Template(a), Str(b)) => Template(a + Template::from(b)),
+        (Str(a), Template(b)) => Template(Template::from(a) + b),
 
         (lhs, _) => return Err(lhs),
     })
@@ -77,9 +77,9 @@ pub fn add(lhs: Value, rhs: Value) -> Value {
         (Str(a), Str(b)) => Str(a + &b),
         (Array(a), Array(b)) => Array(a + &b),
         (Dict(a), Dict(b)) => Dict(a + &b),
-        (Template(a), Template(b)) => Template(a + &b),
-        (Template(a), Str(b)) => Template(a + b),
-        (Str(a), Template(b)) => Template(a + b),
+        (Template(a), Template(b)) => Template(a + b),
+        (Template(a), Str(b)) => Template(a + Template::from(b)),
+        (Str(a), Template(b)) => Template(Template::from(a) + b),
 
         _ => Error,
     }

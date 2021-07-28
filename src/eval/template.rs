@@ -1,139 +1,221 @@
-use std::collections::HashMap;
-use std::fmt::{self, Debug, Formatter};
-use std::ops::{Add, Deref};
-use std::rc::Rc;
+use std::mem;
+use std::ops::{Add, AddAssign};
 
-use super::Value;
+use super::State;
 use crate::eco::EcoString;
-use crate::exec::ExecContext;
-use crate::syntax::{Expr, SyntaxTree};
+use crate::geom::Length;
+use crate::layout::{LayoutNode, LayoutTree, PageNode, ParChild, ParNode, StackNode};
 
-/// A template value: `[*Hi* there]`.
-#[derive(Default, Debug, Clone)]
+/// A structured representation of partially styled content.
+///
+/// Can be layouted or instantiated to become part of a larger template,
+/// inheriting the style of the instantiation site.
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Template {
-    nodes: Rc<Vec<TemplateNode>>,
+    /// A tree of finished page runs.
+    tree: LayoutTree,
+    /// A page of finished paragraphs.
+    page: PageNode,
+    /// The last paragraph.
+    par: ParNode,
 }
 
 impl Template {
-    /// Create a new template from a vector of nodes.
-    pub fn new(nodes: Vec<TemplateNode>) -> Self {
-        Self { nodes: Rc::new(nodes) }
+    /// Create a new, empty template.
+    pub fn new() -> Self {
+        Self {
+            tree: LayoutTree::new(),
+            page: PageNode::new(),
+            par: ParNode::new(),
+        }
     }
 
-    /// Iterate over the contained template nodes.
-    pub fn iter(&self) -> impl Iterator<Item = &TemplateNode> + '_ {
-        self.nodes.iter()
+    // Apply an outer, surrounding state to the template.
+    pub fn apply(&mut self, outer: &State) {
+        todo!()
+    }
+
+    /// Create a template from a single inline node.
+    pub fn from_inline_node(node: impl Into<LayoutNode>, state: &State) -> Self {
+        let mut template = Self::new();
+        template.push_inline_node(node, state);
+        template
+    }
+
+    /// Create a template from a single block node.
+    pub fn from_block_node(node: impl Into<LayoutNode>, state: &State) -> Self {
+        let mut template = Self::new();
+        template.push_block_node(node, state);
+        template
+    }
+
+    /// Insert text into the template.
+    pub fn push_text(&mut self, text: &str, state: &State) {
+        self.par.push_text(text, state.aligns.cross, state.text);
+    }
+
+    /// Insert a word space into the paragraph.
+    pub fn push_space(&mut self, state: &State) {
+        self.par.push_space(state.aligns.cross, state.text);
+    }
+
+    /// Insert a linebreak into the paragraph.
+    pub fn push_linebreak(&mut self, state: &State) {
+        self.par.push_linebreak(state.aligns.cross, state.text);
+    }
+
+    /// Insert a paragraph break.
+    pub fn push_parbreak(&mut self, state: &State) {
+        self.finish_par();
+        self.page
+            .stack
+            .push_soft_spacing(state.text.and_then(|text| text.par_spacing));
+        self.par.line_spacing = state.text.and_then(|text| text.line_spacing);
+        self.par.aligns = state.aligns;
+    }
+
+    /// Insert a pagebreak.
+    pub fn push_pagebreak(&mut self, state: &State, hard: bool) {
+        self.finish_page();
+        self.page.size = state.page.map(|page| page.size).unwrap_or_default();
+        self.page.hard = hard;
+        self.par.line_spacing = state.text.and_then(|text| text.line_spacing);
+        self.par.aligns = state.aligns;
+    }
+
+    /// Insert an arbitrary layoutable node into the active paragraph.
+    pub fn push_inline_node(&mut self, node: impl Into<LayoutNode>, state: &State) {
+        self.par.push_node(node, state.aligns.cross);
+    }
+
+    /// Insert an arbitrary layoutable node into the active stack.
+    ///
+    /// This will finish the active paragraph.
+    pub fn push_block_node(&mut self, node: impl Into<LayoutNode>, state: &State) {
+        self.page.stack.push_node(node, state.aligns);
+    }
+
+    /// Insert spacing into the active paragraph.
+    pub fn push_inline_spacing(&mut self, spacing: Length) {
+        self.par.push_spacing(spacing);
+    }
+
+    /// Insert spacing into the active stack.
+    pub fn push_block_spacing(&mut self, spacing: Length) {
+        self.page.stack.push_hard_spacing(spacing);
+    }
+
+    /// Convert into a paragraph.
+    ///
+    /// Returns `None` if the template contains a paragraph break.
+    pub fn into_par(self) -> Option<ParNode> {
+        (self.tree.is_empty() && self.page.is_empty()).then(|| self.par)
+    }
+
+    /// Convert into a stack.
+    ///
+    /// Returns `None` if the template contains a page break.
+    pub fn into_stack(mut self) -> Option<StackNode> {
+        self.tree.is_empty().then(|| {
+            self.finish_stack();
+            self.page.stack
+        })
+    }
+
+    /// Convert into a layoutable top-level tree.
+    pub fn into_tree(mut self) -> LayoutTree {
+        self.finish_page();
+        self.tree
+    }
+
+    /// Push the active paragraph into the active stack if it's not empty.
+    fn finish_par(&mut self) {
+        let par = mem::take(&mut self.par);
+        if !par.is_empty() {
+            self.page.stack.push_node(par, par.aligns);
+        }
+    }
+
+    /// Remove excess soft spacing from the active stack, making it ready to be
+    /// used as a layout node.
+    ///
+    /// Also finishes the paragraph.
+    fn finish_stack(&mut self) {
+        self.finish_par();
+        self.page.stack.trim();
+    }
+
+    /// Push the active page into the tree if it's not empty or should be kept
+    /// according to its [hardness](PageNode::hard).
+    ///
+    /// Also finishes the paragraph and stack.
+    fn finish_page(&mut self) {
+        self.finish_stack();
+        let page = mem::take(&mut self.page);
+        if page.hard || !page.is_empty() {
+            self.tree.push_page(page);
+        }
     }
 }
 
-impl From<TemplateTree> for Template {
-    fn from(tree: TemplateTree) -> Self {
-        Self::new(vec![TemplateNode::Tree(tree)])
-    }
-}
-
-impl From<TemplateFunc> for Template {
-    fn from(func: TemplateFunc) -> Self {
-        Self::new(vec![TemplateNode::Func(func)])
+impl Default for Template {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 impl From<EcoString> for Template {
     fn from(string: EcoString) -> Self {
-        Self::new(vec![TemplateNode::Str(string)])
+        // FIXME
+        let mut template = Self::new();
+        template.push_text(&string, &State::default());
+        template
     }
 }
 
-impl PartialEq for Template {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.nodes, &other.nodes)
-    }
-}
-
-impl Add<&Template> for Template {
+impl Add for Template {
     type Output = Self;
 
-    fn add(mut self, rhs: &Self) -> Self::Output {
-        Rc::make_mut(&mut self.nodes).extend(rhs.nodes.iter().cloned());
+    fn add(mut self, other: Self) -> Self::Output {
+        self += other;
         self
     }
 }
 
-impl Add<EcoString> for Template {
-    type Output = Self;
-
-    fn add(mut self, rhs: EcoString) -> Self::Output {
-        Rc::make_mut(&mut self.nodes).push(TemplateNode::Str(rhs));
-        self
-    }
-}
-
-impl Add<Template> for EcoString {
-    type Output = Template;
-
-    fn add(self, mut rhs: Template) -> Self::Output {
-        Rc::make_mut(&mut rhs.nodes).insert(0, TemplateNode::Str(self));
-        rhs
-    }
-}
-
-/// One node of a template.
-///
-/// Evaluating a template expression creates only a single node. Adding multiple
-/// templates can yield multi-node templates.
-#[derive(Debug, Clone)]
-pub enum TemplateNode {
-    /// A template that was evaluated from a template expression.
-    Tree(TemplateTree),
-    /// A function template that can implement custom behaviour.
-    Func(TemplateFunc),
-    /// A template that was converted from a string.
-    Str(EcoString),
-}
-
-/// A template that consists of a syntax tree plus already evaluated
-/// expressions.
-#[derive(Debug, Clone)]
-pub struct TemplateTree {
-    /// The syntax tree of the corresponding template expression.
-    pub tree: Rc<SyntaxTree>,
-    /// The evaluated expressions in the syntax tree.
-    pub map: ExprMap,
-}
-
-/// A map from expressions to the values they evaluated to.
-///
-/// The raw pointers point into the expressions contained in some
-/// [`SyntaxTree`]. Since the lifetime is erased, the tree could go out of scope
-/// while the hash map still lives. Although this could lead to lookup panics,
-/// it is not unsafe since the pointers are never dereferenced.
-pub type ExprMap = HashMap<*const Expr, Value>;
-
-/// A reference-counted dynamic template node that can implement custom
-/// behaviour.
-#[derive(Clone)]
-pub struct TemplateFunc(Rc<dyn Fn(&mut ExecContext)>);
-
-impl TemplateFunc {
-    /// Create a new function template from a rust function or closure.
-    pub fn new<F>(f: F) -> Self
-    where
-        F: Fn(&mut ExecContext) + 'static,
-    {
-        Self(Rc::new(f))
-    }
-}
-
-impl Deref for TemplateFunc {
-    type Target = dyn Fn(&mut ExecContext);
-
-    fn deref(&self) -> &Self::Target {
-        self.0.as_ref()
-    }
-}
-
-impl Debug for TemplateFunc {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        f.debug_struct("TemplateFunc").finish()
+impl AddAssign for Template {
+    fn add_assign(&mut self, other: Self) {
+        if other.tree.is_empty() && other.page.stack.is_empty() {
+            // Try merging on the paragraph level.
+            if self.par.dir == other.par.dir
+                && self.par.aligns == other.par.aligns
+                && self.par.line_spacing == other.par.line_spacing
+            {
+                let mut children = other.par.children.into_iter();
+                if let Some(child) = children.next() {
+                    match child {
+                        ParChild::Text(text, align, state) => {
+                            self.par.push_text(&text, align, state)
+                        }
+                        other => self.par.children.push(other),
+                    }
+                }
+                self.par.children.extend(children);
+                return;
+            }
+        } else if other.tree.is_empty() {
+            // Try merging on the stack level. Start with finishing paragraph
+            // because what follows has its own stack.
+            self.finish_par();
+            self.page.stack.push_soft_spacing(None);
+            self.page.stack.children.extend(other.page.stack.children);
+            self.par = other.par;
+        } else {
+            // Merge on the tree level. Start with finishing page because what
+            // follows has its own pages.
+            self.finish_page();
+            self.tree.pages.extend(other.tree.pages);
+            self.page = other.page;
+            self.par = other.par;
+        }
     }
 }

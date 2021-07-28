@@ -30,8 +30,10 @@ use std::hash::Hasher;
 use std::rc::Rc;
 
 use crate::font::FontCache;
+use crate::eval::Defaults;
 use crate::geom::*;
 use crate::image::ImageCache;
+use crate::util::OptionExt;
 use crate::Context;
 
 /// Layout a tree into a collection of frames.
@@ -52,6 +54,8 @@ pub trait Layout {
 
 /// The context for layouting.
 pub struct LayoutContext<'a> {
+    /// The style defaults.
+    pub defaults: &'a Defaults,
     /// The cache for parsed font faces.
     pub fonts: &'a mut FontCache,
     /// The cache for decoded imges.
@@ -68,6 +72,7 @@ impl<'a> LayoutContext<'a> {
     /// Create a new layout context.
     pub fn new(ctx: &'a mut Context) -> Self {
         Self {
+            defaults: &ctx.defaults,
             fonts: &mut ctx.fonts,
             images: &mut ctx.images,
             #[cfg(feature = "layout-cache")]

@@ -8,7 +8,7 @@ pub struct GridNode {
     ///
     /// The rows go along the `main` direction and the columns along the `cross`
     /// direction.
-    pub dirs: Gen<Dir>,
+    pub dirs: Gen<Option<Dir>>,
     /// Defines sizing for content rows and columns.
     pub tracks: Gen<Vec<TrackSizing>>,
     /// Defines sizing of gutter rows and columns between content.
@@ -35,7 +35,7 @@ impl Layout for GridNode {
         regions: &Regions,
     ) -> Vec<Constrained<Rc<Frame>>> {
         // Prepare grid layout by unifying content and gutter tracks.
-        let mut layouter = GridLayouter::new(self, regions.clone());
+        let mut layouter = GridLayouter::new(self, ctx, regions.clone());
 
         // Determine all column sizes.
         layouter.measure_columns(ctx);
@@ -95,7 +95,7 @@ enum Row {
 
 impl<'a> GridLayouter<'a> {
     /// Prepare grid layout by unifying content and gutter tracks.
-    fn new(grid: &'a GridNode, mut regions: Regions) -> Self {
+    fn new(grid: &'a GridNode, ctx: &LayoutContext, mut regions: Regions) -> Self {
         let mut cols = vec![];
         let mut rows = vec![];
 
@@ -133,8 +133,10 @@ impl<'a> GridLayouter<'a> {
         cols.pop();
         rows.pop();
 
-        let cross = grid.dirs.cross.axis();
-        let main = grid.dirs.main.axis();
+        let dirs = grid.dirs.unwrap_or(ctx.defaults.dirs);
+        let cross = dirs.cross.axis();
+        let main = dirs.main.axis();
+
         let full = regions.current.get(main);
         let rcols = vec![Length::zero(); cols.len()];
 

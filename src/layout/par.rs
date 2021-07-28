@@ -6,33 +6,110 @@ use xi_unicode::LineBreakIterator;
 
 use super::*;
 use crate::eco::EcoString;
-use crate::exec::TextState;
+use crate::eval::TextState;
 use crate::util::{RangeExt, SliceExt};
 
 type Range = std::ops::Range<usize>;
 
 /// A node that arranges its children into a paragraph.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "layout-cache", derive(Hash))]
 pub struct ParNode {
     /// The inline direction of this paragraph.
-    pub dir: Dir,
+    pub dir: Option<Dir>,
     /// The spacing to insert between each line.
-    pub line_spacing: Length,
+    pub line_spacing: Option<Linear>,
     /// The nodes to be arranged in a paragraph.
     pub children: Vec<ParChild>,
+    /// Temporary storage for alignments.
+    pub aligns: Gen<Option<Align>>,
 }
 
 /// A child of a paragraph node.
 #[derive(Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "layout-cache", derive(Hash))]
 pub enum ParChild {
+    /// A run of text and how to align it in its line.
+    Text(EcoString, Option<Align>, Option<Rc<TextState>>),
+    /// Any child node and how to align it in its line.
+    Node(LayoutNode, Option<Align>),
     /// Spacing between other nodes.
     Spacing(Length),
-    /// A run of text and how to align it in its line.
-    Text(EcoString, Align, Rc<TextState>),
-    /// Any child node and how to align it in its line.
-    Any(LayoutNode, Align),
+}
+
+impl ParNode {
+    /// Create a new, empty paragraph.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether the paragraph has no children.
+    pub fn is_empty(&self) -> bool {
+        self.children.is_empty()
+    }
+
+    /// Insert text into the paragraph.
+    pub fn push_text(
+        &mut self,
+        text: &str,
+        align: Option<Align>,
+        state: Option<Rc<TextState>>,
+    ) {
+        if let Some(ParChild::Text(prev_text, prev_align, prev_state)) =
+            self.children.last_mut()
+        {
+            // Merge children with same style.
+            if *prev_align == align && *prev_state == state {
+                prev_text.push_str(text);
+                return;
+            }
+        }
+        self.children.push(ParChild::Text(text.into(), align, state));
+    }
+
+    /// Insert a word space into the paragraph.
+    pub fn push_space(&mut self, align: Option<Align>, state: Option<Rc<TextState>>) {
+        if match self.children.last() {
+            Some(ParChild::Text(text, ..)) => {
+                text.chars().last().map_or(false, |c| !c.is_whitespace())
+            }
+            Some(ParChild::Spacing(_)) => false,
+            Some(ParChild::Node(..)) => true,
+            None => false,
+        } {
+            self.push_text(" ", align, state);
+        }
+    }
+
+    /// Insert a linebreak into the paragraph.
+    pub fn push_linebreak(&mut self, align: Option<Align>, state: Option<Rc<TextState>>) {
+        self.trim();
+        self.push_text("\n", align, state);
+    }
+
+    /// Insert an arbitrary layoutable node into the paragraph.
+    pub fn push_node(&mut self, node: impl Into<LayoutNode>, align: Option<Align>) {
+        self.children.push(ParChild::Node(node.into(), align));
+    }
+
+    /// Insert spacing into the paragraph.
+    pub fn push_spacing(&mut self, spacing: Length) {
+        self.trim();
+        self.children.push(ParChild::Spacing(spacing));
+    }
+
+    /// Remove a trailing space if it exists.
+    pub fn trim(&mut self) {
+        if let Some(ParChild::Text(text, ..)) = self.children.last_mut() {
+            if text.chars().last() == Some(' ') {
+                text.pop();
+            }
+
+            if text.is_empty() {
+                self.children.pop();
+            }
+        }
+    }
 }
 
 impl Layout for ParNode {
@@ -45,11 +122,12 @@ impl Layout for ParNode {
         let text = self.collect_text();
 
         // Find out the BiDi embedding levels.
-        let bidi = BidiInfo::new(&text, Level::from_dir(self.dir));
+        let dir = self.dir.unwrap_or(ctx.defaults.dirs.cross);
+        let bidi = BidiInfo::new(&text, Level::from_dir(dir));
 
         // Prepare paragraph layout by building a representation on which we can
         // do line breaking without layouting each and every line from scratch.
-        let layouter = ParLayouter::new(self, ctx, regions, bidi);
+        let layouter = ParLayouter::new(self, dir, ctx, regions, bidi);
 
         // Find suitable linebreaks.
         layouter.layout(ctx, regions.clone())
@@ -84,7 +162,7 @@ impl ParNode {
         self.children.iter().map(|child| match child {
             ParChild::Spacing(_) => " ",
             ParChild::Text(ref piece, _, _) => piece,
-            ParChild::Any(_, _) => "\u{FFFC}",
+            ParChild::Node(_, _) => "\u{FFFC}",
         })
     }
 }
@@ -100,7 +178,7 @@ impl Debug for ParChild {
         match self {
             Self::Spacing(amount) => write!(f, "Spacing({:?})", amount),
             Self::Text(text, align, _) => write!(f, "Text({:?}, {:?})", text, align),
-            Self::Any(any, align) => {
+            Self::Node(any, align) => {
                 f.debug_tuple("Any").field(any).field(align).finish()
             }
         }
@@ -126,7 +204,8 @@ impl<'a> ParLayouter<'a> {
     /// Prepare initial shaped text and layouted children.
     fn new(
         par: &'a ParNode,
-        ctx: &mut LayoutContext,
+        dir: Dir,
+        ctx: &'a mut LayoutContext,
         regions: &Regions,
         bidi: BidiInfo<'a>,
     ) -> Self {
@@ -145,26 +224,36 @@ impl<'a> ParLayouter<'a> {
                     // TODO: Also split by language and script.
                     for (subrange, dir) in split_runs(&bidi, range) {
                         let text = &bidi.text[subrange.clone()];
-                        let shaped = shape(ctx, text, dir, state);
-                        items.push(ParItem::Text(shaped, align));
+                        let shaped = shape(
+                            ctx,
+                            text,
+                            dir,
+                            state.as_deref().unwrap_or(&ctx.defaults.text),
+                        );
+                        items.push(ParItem::Text(
+                            shaped,
+                            align.unwrap_or(ctx.defaults.aligns.cross),
+                        ));
                         ranges.push(subrange);
                     }
                 }
-                ParChild::Any(ref node, align) => {
+                ParChild::Node(ref node, align) => {
                     let frame = node.layout(ctx, regions).remove(0);
-                    items.push(ParItem::Frame(frame.item, align));
+                    items.push(ParItem::Frame(
+                        frame.item,
+                        align.unwrap_or(ctx.defaults.aligns.cross),
+                    ));
                     ranges.push(range);
                 }
             }
         }
 
-        Self {
-            dir: par.dir,
-            line_spacing: par.line_spacing,
-            bidi,
-            items,
-            ranges,
-        }
+        let line_spacing = par
+            .line_spacing
+            .unwrap_or(ctx.defaults.line_spacing)
+            .resolve(ctx.defaults.font_size);
+
+        Self { dir, line_spacing, bidi, items, ranges }
     }
 
     /// Find first-fit line breaks and build the paragraph.

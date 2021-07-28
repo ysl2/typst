@@ -76,6 +76,14 @@ impl Add for Relative {
 
 sub_impl!(Relative - Relative -> Relative);
 
+impl Mul for Relative {
+    type Output = Self;
+
+    fn mul(self, other: Self) -> Self {
+        Self(self.0 * other.0)
+    }
+}
+
 impl Mul<f64> for Relative {
     type Output = Self;
 
