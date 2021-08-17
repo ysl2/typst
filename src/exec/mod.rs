@@ -1,15 +1,15 @@
 //! Execution of syntax trees.
 
 mod context;
-mod state;
+mod env;
 
 pub use context::*;
-pub use state::*;
+pub use env::*;
 
 use std::fmt::Write;
 
 use crate::eval::{ExprMap, Template, TemplateFunc, TemplateNode, TemplateTree, Value};
-use crate::geom::Gen;
+use crate::geom::{Gen, Relative};
 use crate::layout::{LayoutTree, StackChild, StackNode};
 use crate::syntax::*;
 use crate::util::EcoString;
@@ -55,8 +55,8 @@ impl ExecWithMap for SyntaxNode {
             Self::Text(text) => ctx.text(text),
             Self::Linebreak(_) => ctx.linebreak(),
             Self::Parbreak(_) => ctx.parbreak(),
-            Self::Strong(_) => ctx.state.font_mut().strong ^= true,
-            Self::Emph(_) => ctx.state.font_mut().emph ^= true,
+            Self::Strong(_) => ctx.set(property::Strong),
+            Self::Emph(_) => ctx.set(property::Emph),
             Self::Raw(n) => n.exec(ctx),
             Self::Heading(n) => n.exec_with_map(ctx, map),
             Self::List(n) => n.exec_with_map(ctx, map),
@@ -72,7 +72,9 @@ impl Exec for RawNode {
             ctx.parbreak();
         }
 
-        ctx.text_mono(&self.text);
+        ctx.set(property::Monospace);
+        ctx.text(&self.text);
+        ctx.set(property::Monospace);
 
         if self.block {
             ctx.parbreak();
@@ -84,15 +86,14 @@ impl ExecWithMap for HeadingNode {
     fn exec_with_map(&self, ctx: &mut ExecContext, map: &ExprMap) {
         ctx.parbreak();
 
-        let snapshot = ctx.state.clone();
-        let font = ctx.state.font_mut();
-        let upscale = 1.6 - 0.1 * self.level as f64;
-        font.size *= upscale;
-        font.strong = true;
+        let snapshot = ctx.save();
+        let upscale = Relative::new(1.6 - 0.1 * self.level as f64);
+        ctx.set(property::FontSize(upscale.into()));
+        ctx.set(property::Strong);
 
         self.body.exec_with_map(ctx, map);
-        ctx.state = snapshot;
 
+        ctx.restore(snapshot);
         ctx.parbreak();
     }
 }
@@ -135,7 +136,11 @@ impl Exec for Value {
             Value::Template(v) => v.exec(ctx),
             // For values which can't be shown "naturally", we print the
             // representation in monospace.
-            other => ctx.text_mono(other.to_string()),
+            other => {
+                ctx.set(property::Monospace);
+                ctx.text(other.to_string());
+                ctx.set(property::Monospace);
+            }
         }
     }
 }
@@ -166,8 +171,8 @@ impl Exec for TemplateTree {
 
 impl Exec for TemplateFunc {
     fn exec(&self, ctx: &mut ExecContext) {
-        let snapshot = ctx.state.clone();
+        let snapshot = ctx.save();
         self(ctx);
-        ctx.state = snapshot;
+        ctx.restore(snapshot);
     }
 }

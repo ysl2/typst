@@ -80,7 +80,7 @@ fn main() {
 
     // Create loader and context.
     let loader = FsLoader::new().with_path(FONT_DIR).wrap();
-    let mut ctx = Context::builder().std(std).state(state).build(loader);
+    let mut ctx = Context::builder().std(std).env(state).build(loader);
 
     // Run all the tests.
     let mut ok = true;

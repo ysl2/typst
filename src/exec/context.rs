@@ -1,7 +1,8 @@
+use std::fmt::Debug;
 use std::mem;
 use std::rc::Rc;
 
-use super::{Exec, ExecWithMap, State};
+use super::{Env, Exec, ExecWithMap, Property};
 use crate::eval::{ExprMap, Template};
 use crate::geom::{Align, Dir, Gen, GenAxis, Length, Linear, Sides, Size};
 use crate::layout::{
@@ -13,8 +14,8 @@ use crate::Context;
 
 /// The context for execution.
 pub struct ExecContext {
-    /// The active execution state.
-    pub state: State,
+    /// The active execution environment.
+    env: Env,
     /// The tree of finished page runs.
     tree: LayoutTree,
     /// When we are building the top-level stack, this contains metrics of the
@@ -25,14 +26,32 @@ pub struct ExecContext {
 }
 
 impl ExecContext {
-    /// Create a new execution context with a base state.
+    /// Create a new execution context.
     pub fn new(ctx: &mut Context) -> Self {
         Self {
-            state: ctx.state.clone(),
+            env: ctx.env.clone(),
             tree: LayoutTree { runs: vec![] },
-            page: Some(PageBuilder::new(&ctx.state, true)),
-            stack: StackBuilder::new(&ctx.state),
+            page: Some(PageBuilder::new(&ctx.env, true)),
+            stack: StackBuilder::new(&ctx.env),
         }
+    }
+
+    /// Return a snapshot of the current environment.
+    pub fn save(&self) -> Env {
+        self.env.clone()
+    }
+
+    /// Restore a snapshot of the environment.
+    pub fn restore(&self, snapshot: Env) {
+        self.env = snapshot;
+    }
+
+    /// Insert a property into the context's environment.
+    pub fn set<P>(&mut self, property: P)
+    where
+        P: Property + Debug + Clone,
+    {
+        self.env.set(property);
     }
 
     /// Push a word space into the active paragraph.
@@ -47,16 +66,16 @@ impl ExecContext {
 
     /// Apply a forced paragraph break.
     pub fn parbreak(&mut self) {
-        let amount = self.state.par_spacing();
-        self.stack.finish_par(&self.state);
+        let amount = self.env.par_spacing();
+        self.stack.finish_par(&self.env);
         self.stack.push_soft(StackChild::Spacing(amount.into()));
     }
 
     /// Apply a forced page break.
     pub fn pagebreak(&mut self, keep: bool, hard: bool) {
         if let Some(builder) = &mut self.page {
-            let page = mem::replace(builder, PageBuilder::new(&self.state, hard));
-            let stack = mem::replace(&mut self.stack, StackBuilder::new(&self.state));
+            let page = mem::replace(builder, PageBuilder::new(&self.env, hard));
+            let stack = mem::replace(&mut self.stack, StackBuilder::new(&self.env));
             self.tree.runs.extend(page.build(stack.build(), keep));
         }
     }
@@ -68,24 +87,16 @@ impl ExecContext {
         self.stack.par.push(self.make_text_node(text));
     }
 
-    /// Push text, but in monospace.
-    pub fn text_mono(&mut self, text: impl Into<EcoString>) {
-        let prev = Rc::clone(&self.state.font);
-        self.state.font_mut().monospace = true;
-        self.text(text);
-        self.state.font = prev;
-    }
-
     /// Push an inline node into the active paragraph.
     pub fn inline(&mut self, node: impl Into<LayoutNode>) {
-        let align = self.state.aligns.cross;
+        let align = self.env.aligns.cross;
         self.stack.par.push(ParChild::Any(node.into(), align));
     }
 
     /// Push a block node into the active stack, finishing the active paragraph.
     pub fn block(&mut self, node: impl Into<LayoutNode>) {
         self.parbreak();
-        let aligns = self.state.aligns;
+        let aligns = self.env.aligns;
         self.stack.push(StackChild::Any(node.into(), aligns));
         self.parbreak();
     }
@@ -94,7 +105,7 @@ impl ExecContext {
     pub fn spacing(&mut self, axis: GenAxis, amount: Linear) {
         match axis {
             GenAxis::Main => {
-                self.stack.finish_par(&self.state);
+                self.stack.finish_par(&self.env);
                 self.stack.push_hard(StackChild::Spacing(amount));
             }
             GenAxis::Cross => {
@@ -115,13 +126,13 @@ impl ExecContext {
 
     /// Execute something and return the result as a stack node.
     pub fn exec_to_stack(&mut self, f: impl FnOnce(&mut Self)) -> StackNode {
-        let snapshot = self.state.clone();
+        let snapshot = self.save();
         let page = self.page.take();
-        let stack = mem::replace(&mut self.stack, StackBuilder::new(&self.state));
+        let stack = mem::replace(&mut self.stack, StackBuilder::new(&self.env));
 
         f(self);
 
-        self.state = snapshot;
+        self.restore(snapshot);
         self.page = page;
         mem::replace(&mut self.stack, stack).build()
     }
@@ -134,12 +145,12 @@ impl ExecContext {
     }
 
     /// Construct a text node with the given text and settings from the active
-    /// state.
+    /// environment.
     fn make_text_node(&self, text: impl Into<EcoString>) -> ParChild {
         ParChild::Text(
             text.into(),
-            self.state.aligns.cross,
-            Rc::clone(&self.state.font),
+            self.env.aligns.cross,
+            Rc::clone(&self.env.font),
         )
     }
 }
@@ -151,10 +162,10 @@ struct PageBuilder {
 }
 
 impl PageBuilder {
-    fn new(state: &State, hard: bool) -> Self {
+    fn new(env: &Env, hard: bool) -> Self {
         Self {
-            size: state.page.size,
-            padding: state.page.margins(),
+            size: env.page.size,
+            padding: env.page.margins(),
             hard,
         }
     }
@@ -176,12 +187,12 @@ struct StackBuilder {
 }
 
 impl StackBuilder {
-    fn new(state: &State) -> Self {
+    fn new(env: &Env) -> Self {
         Self {
-            dirs: state.dirs,
+            dirs: env.dirs,
             children: vec![],
             last: Last::None,
-            par: ParBuilder::new(state),
+            par: ParBuilder::new(env),
         }
     }
 
@@ -199,8 +210,8 @@ impl StackBuilder {
         self.children.push(child);
     }
 
-    fn finish_par(&mut self, state: &State) {
-        let par = mem::replace(&mut self.par, ParBuilder::new(state));
+    fn finish_par(&mut self, env: &Env) {
+        let par = mem::replace(&mut self.par, ParBuilder::new(env));
         if let Some(par) = par.build() {
             self.push(par);
         }
@@ -225,11 +236,11 @@ struct ParBuilder {
 }
 
 impl ParBuilder {
-    fn new(state: &State) -> Self {
+    fn new(env: &Env) -> Self {
         Self {
-            aligns: state.aligns,
-            dir: state.dirs.cross,
-            line_spacing: state.line_spacing(),
+            aligns: env.aligns,
+            dir: env.dirs.cross,
+            line_spacing: env.line_spacing(),
             children: vec![],
             last: Last::None,
         }

@@ -1,4 +1,3 @@
-use crate::exec::{FontState, LineState};
 use crate::layout::Paint;
 
 use super::*;
@@ -174,9 +173,11 @@ pub fn overline(_: &mut EvalContext, args: &mut Arguments) -> TypResult<Value> {
     line_impl(args, |font| &mut font.overline)
 }
 
+type LineState = ();
+
 fn line_impl(
     args: &mut Arguments,
-    substate: fn(&mut FontState) -> &mut Option<Rc<LineState>>,
+    substate: fn(&mut Env) -> &mut Option<Rc<LineState>>,
 ) -> TypResult<Value> {
     let stroke = args.named("stroke")?.or_else(|| args.eat());
     let thickness = args.named::<Linear>("thickness")?.or_else(|| args.eat());

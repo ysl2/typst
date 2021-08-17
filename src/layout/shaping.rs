@@ -5,7 +5,7 @@ use std::ops::Range;
 use rustybuzz::UnicodeBuffer;
 
 use super::{Element, Frame, Glyph, LayoutContext, Text};
-use crate::exec::{FontState, LineState};
+use crate::exec::Env;
 use crate::font::{Face, FaceId, FontVariant, LineMetrics};
 use crate::geom::{Dir, Length, Point, Size};
 use crate::layout::Geometry;
@@ -23,8 +23,8 @@ pub struct ShapedText<'a> {
     /// The text direction.
     pub dir: Dir,
     /// The properties used for font selection.
-    pub state: &'a FontState,
-    /// The font size.
+    pub env: &'a Env,
+    /// The size of the shaped text's frame.
     pub size: Size,
     /// The baseline from the top of the frame.
     pub baseline: Length,
@@ -185,7 +185,7 @@ pub fn shape<'a>(
     ctx: &mut LayoutContext,
     text: &'a str,
     dir: Dir,
-    state: &'a FontState,
+    env: &'a Env,
 ) -> ShapedText<'a> {
     let mut glyphs = vec![];
     if !text.is_empty() {
@@ -195,19 +195,19 @@ pub fn shape<'a>(
             0,
             text,
             dir,
-            state.size,
-            state.variant(),
-            state.families(),
+            env.size,
+            env.variant(),
+            env.families(),
             None,
         );
     }
 
-    let (size, baseline) = measure(ctx, &glyphs, state);
+    let (size, baseline) = measure(ctx, &glyphs, env);
 
     ShapedText {
         text,
         dir,
-        state,
+        env,
         size,
         baseline,
         glyphs: Cow::Owned(glyphs),
@@ -343,11 +343,7 @@ fn shape_segment<'a>(
 
 /// Measure the size and baseline of a run of shaped glyphs with the given
 /// properties.
-fn measure(
-    ctx: &mut LayoutContext,
-    glyphs: &[ShapedGlyph],
-    state: &FontState,
-) -> (Size, Length) {
+fn measure(ctx: &mut LayoutContext, glyphs: &[ShapedGlyph], env: &Env) -> (Size, Length) {
     let mut width = Length::zero();
     let mut top = Length::zero();
     let mut bottom = Length::zero();
@@ -386,7 +382,7 @@ fn decorate(
     pos: Point,
     width: Length,
     face_id: FaceId,
-    state: &FontState,
+    env: &Env,
 ) {
     let mut apply = |substate: &LineState, metrics: fn(&Face) -> &LineMetrics| {
         let metrics = metrics(ctx.fonts.get(face_id));

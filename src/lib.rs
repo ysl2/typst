@@ -51,7 +51,7 @@ use std::rc::Rc;
 
 use crate::diag::TypResult;
 use crate::eval::Scope;
-use crate::exec::State;
+use crate::exec::Env;
 use crate::font::FontStore;
 use crate::image::ImageStore;
 use crate::layout::Frame;
@@ -75,8 +75,8 @@ pub struct Context {
     pub layouts: LayoutCache,
     /// The standard library scope.
     std: Scope,
-    /// The default state.
-    state: State,
+    /// The default environment.
+    env: Env,
 }
 
 impl Context {
@@ -117,7 +117,7 @@ impl Context {
 #[derive(Default)]
 pub struct ContextBuilder {
     std: Option<Scope>,
-    state: Option<State>,
+    env: Option<Env>,
 }
 
 impl ContextBuilder {
@@ -129,8 +129,8 @@ impl ContextBuilder {
     }
 
     /// The initial properties for page size, font selection and so on.
-    pub fn state(mut self, state: State) -> Self {
-        self.state = Some(state);
+    pub fn env(mut self, env: Env) -> Self {
+        self.env = Some(env);
         self
     }
 
@@ -145,7 +145,7 @@ impl ContextBuilder {
             #[cfg(feature = "layout-cache")]
             layouts: LayoutCache::new(),
             std: self.std.unwrap_or(library::new()),
-            state: self.state.unwrap_or_default(),
+            env: self.env.unwrap_or_default(),
         }
     }
 }
