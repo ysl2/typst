@@ -20,8 +20,6 @@ pub fn join(lhs: Value, rhs: Value) -> StrResult<Value> {
         (Array(a), Array(b)) => Array(a + b),
         (Dict(a), Dict(b)) => Dict(a + b),
         (Template(a), Template(b)) => Template(a + b),
-        (Template(a), Str(b)) => Template(a + b),
-        (Str(a), Template(b)) => Template(a + b),
         (a, b) => mismatch!("cannot join {} with {}", a, b),
     })
 }
@@ -82,8 +80,6 @@ pub fn add(lhs: Value, rhs: Value) -> StrResult<Value> {
         (Array(a), Array(b)) => Array(a + b),
         (Dict(a), Dict(b)) => Dict(a + b),
         (Template(a), Template(b)) => Template(a + b),
-        (Template(a), Str(b)) => Template(a + b),
-        (Str(a), Template(b)) => Template(a + b),
 
         (a, b) => mismatch!("cannot add {} and {}", a, b),
     })

@@ -4,7 +4,6 @@ use std::mem;
 use std::ops::{Add, AddAssign};
 use std::rc::Rc;
 
-use super::Str;
 use crate::diag::StrResult;
 use crate::geom::{Align, Dir, Gen, GenAxis, Length, Linear, Sides, Size};
 use crate::layout::{
@@ -216,24 +215,6 @@ impl AddAssign for Template {
             Ok(source) => sink.extend(source),
             Err(rc) => sink.extend(rc.iter().cloned()),
         }
-    }
-}
-
-impl Add<Str> for Template {
-    type Output = Self;
-
-    fn add(mut self, rhs: Str) -> Self::Output {
-        Rc::make_mut(&mut self.0).push(TemplateNode::Text(rhs.into(), vec![]));
-        self
-    }
-}
-
-impl Add<Template> for Str {
-    type Output = Template;
-
-    fn add(self, mut rhs: Template) -> Self::Output {
-        Rc::make_mut(&mut rhs.0).insert(0, TemplateNode::Text(self.into(), vec![]));
-        rhs
     }
 }
 

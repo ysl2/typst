@@ -4,22 +4,22 @@
 ---
 // Ref: true
 
-// Evaluates to join of none, [My ] and the two loop bodies.
+// Evaluates to join of none, "My " and the two loop bodies.
 {
   let parts = ("my fri", "end.")
-  [Hello, ]
-  for s in parts [{s}]
+  "Hello, "
+  for s in parts {s}
 }
 
 // Evaluates to join of the templates and strings.
 {
   [How]
   if true {
-    " are"
+    [ are]
   }
   [ ]
   if false [Nope]
-  [you] + "?"
+  [you] + [?]
 }
 
 ---
