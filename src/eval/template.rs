@@ -153,6 +153,14 @@ impl Template {
         wrapper
     }
 
+    /// Build the par node resulting from instantiating the template with the
+    /// given style.
+    pub fn to_par(&self, style: &Style) -> ParNode {
+        let mut builder = Builder::new(style, false);
+        builder.template(self);
+        builder.build_par()
+    }
+
     /// Build the stack node resulting from instantiating the template with the
     /// given style.
     pub fn to_stack(&self, style: &Style) -> StackNode {
@@ -331,6 +339,14 @@ impl Builder {
                 self.stack.par.push_hard(ParChild::Spacing(amount));
             }
         }
+    }
+
+    /// Finish building and return the created paragraph.
+    fn build_par(self) -> ParNode {
+        assert!(self.page.is_none());
+        assert!(self.stack.children.is_empty());
+        let ParBuilder { dir, line_spacing, children, .. } = self.stack.par;
+        ParNode { dir, line_spacing, children }
     }
 
     /// Finish building and return the created stack.
