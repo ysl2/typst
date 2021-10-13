@@ -5,7 +5,7 @@ use std::ops::{Add, AddAssign};
 use std::rc::Rc;
 
 use crate::diag::StrResult;
-use crate::geom::{Align, Dir, Gen, GenAxis, Length, Linear, Sides, Size};
+use crate::geom::{Align, Dir, GenAxis, Length, Linear, Sides, Size};
 use crate::layout::{
     Decoration, LayoutNode, LayoutTree, PadNode, PageRun, ParChild, ParNode, StackChild,
     StackNode,
@@ -316,8 +316,7 @@ impl Builder {
     /// Push a block node into the active stack, finishing the active paragraph.
     fn block(&mut self, node: impl Into<LayoutNode>) {
         self.parbreak();
-        let aligns = self.style.aligns;
-        self.stack.push(StackChild::Any(node.into(), aligns));
+        self.stack.push(StackChild::Any(node.into(), self.style.aligns.block));
         self.parbreak();
     }
 
@@ -388,7 +387,7 @@ impl PageBuilder {
 }
 
 struct StackBuilder {
-    dirs: Gen<Dir>,
+    dir: Dir,
     children: Vec<StackChild>,
     last: Last<StackChild>,
     par: ParBuilder,
@@ -397,7 +396,7 @@ struct StackBuilder {
 impl StackBuilder {
     fn new(style: &Style) -> Self {
         Self {
-            dirs: Gen::new(style.dir, Dir::TTB),
+            dir: Dir::TTB,
             children: vec![],
             last: Last::None,
             par: ParBuilder::new(style),
@@ -426,17 +425,17 @@ impl StackBuilder {
     }
 
     fn build(self) -> StackNode {
-        let Self { dirs, mut children, par, mut last } = self;
+        let Self { dir, mut children, par, mut last } = self;
         if let Some(par) = par.build() {
             children.extend(last.any());
             children.push(par);
         }
-        StackNode { dirs, children }
+        StackNode { dir, children }
     }
 }
 
 struct ParBuilder {
-    aligns: Gen<Align>,
+    align: Align,
     dir: Dir,
     line_spacing: Length,
     children: Vec<ParChild>,
@@ -446,7 +445,7 @@ struct ParBuilder {
 impl ParBuilder {
     fn new(style: &Style) -> Self {
         Self {
-            aligns: style.aligns,
+            align: style.aligns.block,
             dir: style.dir,
             line_spacing: style.line_spacing(),
             children: vec![],
@@ -489,10 +488,10 @@ impl ParBuilder {
     }
 
     fn build(self) -> Option<StackChild> {
-        let Self { aligns, dir, line_spacing, children, .. } = self;
+        let Self { align, dir, line_spacing, children, .. } = self;
         (!children.is_empty()).then(|| {
             let node = ParNode { dir, line_spacing, children };
-            StackChild::Any(node.into(), aligns)
+            StackChild::Any(node.into(), align)
         })
     }
 }
