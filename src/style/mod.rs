@@ -14,10 +14,6 @@ use crate::geom::*;
 /// Defines a set of properties a template can be instantiated with.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Style {
-    /// The direction for text and other inline objects.
-    pub dir: Dir,
-    /// The alignments of layouts in their parents.
-    pub aligns: Gen<Align>,
     /// The page settings.
     pub page: Rc<PageStyle>,
     /// The paragraph settings.
@@ -56,8 +52,6 @@ impl Style {
 impl Default for Style {
     fn default() -> Self {
         Self {
-            dir: Dir::LTR,
-            aligns: Gen::splat(Align::Start),
             page: Rc::new(PageStyle::default()),
             par: Rc::new(ParStyle::default()),
             text: Rc::new(TextStyle::default()),
@@ -104,6 +98,10 @@ impl Default for PageStyle {
 /// Defines style properties of paragraphs.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct ParStyle {
+    /// The direction for text and other inline objects.
+    pub dir: Dir,
+    /// How to align a paragraph in its stack.
+    pub align: Align,
     /// The spacing between paragraphs (dependent on scaled font size).
     pub spacing: Linear,
     /// The spacing between lines (dependent on scaled font size).
@@ -113,6 +111,8 @@ pub struct ParStyle {
 impl Default for ParStyle {
     fn default() -> Self {
         Self {
+            dir: Dir::LTR,
+            align: Align::Start,
             spacing: Relative::new(1.2).into(),
             leading: Relative::new(0.65).into(),
         }
@@ -122,6 +122,8 @@ impl Default for ParStyle {
 /// Defines style properties of text.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct TextStyle {
+    /// How to align text in its paragraph.
+    pub align: Align,
     /// The font size.
     pub size: Length,
     /// The selected font variant (the final variant also depends on `strong`
@@ -202,6 +204,7 @@ impl TextStyle {
 impl Default for TextStyle {
     fn default() -> Self {
         Self {
+            align: Align::Start,
             size: Length::pt(11.0),
             variant: FontVariant {
                 style: FontStyle::Normal,

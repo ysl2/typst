@@ -10,44 +10,43 @@ mod str;
 mod value;
 mod capture;
 mod function;
+mod node;
 mod ops;
 mod scope;
-mod template;
-mod walk;
 
 pub use self::str::*;
 pub use array::*;
 pub use capture::*;
 pub use dict::*;
 pub use function::*;
+pub use node::*;
 pub use scope::*;
-pub use template::*;
 pub use value::*;
-pub use walk::*;
 
 use std::cell::RefMut;
-use std::collections::HashMap;
 use std::io;
 use std::mem;
 use std::path::PathBuf;
 use std::rc::Rc;
 
 use crate::diag::{At, Error, StrResult, Trace, Tracepoint, TypResult};
-use crate::geom::{Angle, Fractional, Length, Relative};
+use crate::geom::{Align, Angle, Fractional, Length, Relative};
 use crate::image::ImageStore;
+use crate::layout::{StackChild, StackNode};
 use crate::loading::Loader;
 use crate::parse::parse;
 use crate::source::{SourceId, SourceStore};
+use crate::style::Style;
 use crate::syntax::visit::Visit;
 use crate::syntax::*;
-use crate::util::RefMutExt;
+use crate::util::{BoolExt, EcoString, RefMutExt};
 use crate::Context;
 
 /// Evaluate a parsed source file into a module.
 pub fn eval(ctx: &mut Context, source: SourceId, markup: &Markup) -> TypResult<Module> {
     let mut ctx = EvalContext::new(ctx, source);
-    let template = markup.eval(&mut ctx)?;
-    Ok(Module { scope: ctx.scopes.top, template })
+    let root = markup.eval(&mut ctx)?;
+    Ok(Module { scope: ctx.scopes.top, root })
 }
 
 /// An evaluated module, ready for importing or instantiation.
@@ -55,8 +54,8 @@ pub fn eval(ctx: &mut Context, source: SourceId, markup: &Markup) -> TypResult<M
 pub struct Module {
     /// The top-level definitions that were bound in this module.
     pub scope: Scope,
-    /// The template defined by this module.
-    pub template: Template,
+    /// The root node defined by this module.
+    pub root: Node,
 }
 
 /// The context for evaluation.
@@ -67,14 +66,12 @@ pub struct EvalContext<'a> {
     pub sources: &'a mut SourceStore,
     /// Stores decoded images.
     pub images: &'a mut ImageStore,
-    /// The stack of imported files that led to evaluation of the current file.
+    /// The trail of importing files that led to evaluation of the current file.
     pub route: Vec<SourceId>,
-    /// Caches imported modules.
-    pub modules: HashMap<SourceId, Module>,
     /// The active scopes.
     pub scopes: Scopes<'a>,
-    /// The currently built template.
-    pub template: Template,
+    /// The active style.
+    pub style: Style,
 }
 
 impl<'a> EvalContext<'a> {
@@ -85,14 +82,13 @@ impl<'a> EvalContext<'a> {
             sources: &mut ctx.sources,
             images: &mut ctx.images,
             route: vec![source],
-            modules: HashMap::new(),
             scopes: Scopes::new(Some(&ctx.std)),
-            template: Template::new(),
+            style: ctx.style.clone(),
         }
     }
 
     /// Process an import of a module relative to the current location.
-    pub fn import(&mut self, path: &str, span: Span) -> TypResult<SourceId> {
+    pub fn import(&mut self, path: &str, span: Span) -> TypResult<Module> {
         // Load the source file.
         let full = self.make_path(path);
         let id = self.sources.load(&full).map_err(|err| {
@@ -107,32 +103,23 @@ impl<'a> EvalContext<'a> {
             bail!(span, "cyclic import");
         }
 
-        // Check whether the module was already loaded.
-        if self.modules.get(&id).is_some() {
-            return Ok(id);
-        }
-
         // Parse the file.
         let source = self.sources.get(id);
         let ast = parse(&source)?;
 
-        // Prepare the new context.
-        let new_scopes = Scopes::new(self.scopes.base);
-        let old_scopes = mem::replace(&mut self.scopes, new_scopes);
+        // Prepare new scopes.
+        let scopes = Scopes::new(self.scopes.base);
+        let snapshot = mem::replace(&mut self.scopes, scopes);
         self.route.push(id);
 
         // Evaluate the module.
-        let template = Rc::new(ast).eval(self).trace(|| Tracepoint::Import, span)?;
+        let root = ast.eval(self).trace(|| Tracepoint::Import, span)?;
 
         // Restore the old context.
-        let new_scopes = mem::replace(&mut self.scopes, old_scopes);
+        let scopes = mem::replace(&mut self.scopes, snapshot);
         self.route.pop().unwrap();
 
-        // Save the evaluated module.
-        let module = Module { scope: new_scopes.top, template };
-        self.modules.insert(id, module);
-
-        Ok(id)
+        Ok(Module { scope: scopes.top, root })
     }
 
     /// Complete a user-entered path (relative to the source file) to be
@@ -146,6 +133,18 @@ impl<'a> EvalContext<'a> {
 
         path.into()
     }
+
+    /// Create a text node with the current style.
+    pub fn make_text(&self, text: impl Into<EcoString>) -> Node {
+        Node::Text(text.into(), self.style.text.clone())
+    }
+
+    /// Create a text node with the current style plus monospace.
+    pub fn make_monospace_text(&self, text: impl Into<EcoString>) -> Node {
+        let mut style = (*self.style.text).clone();
+        style.monospace = true;
+        Node::Text(text.into(), Rc::new(style))
+    }
 }
 
 /// Evaluate an expression.
@@ -158,17 +157,127 @@ pub trait Eval {
 }
 
 impl Eval for Markup {
-    type Output = Template;
+    type Output = Node;
 
     fn eval(&self, ctx: &mut EvalContext) -> TypResult<Self::Output> {
-        Ok({
-            let prev = mem::take(&mut ctx.template);
-            ctx.template.save();
-            self.walk(ctx)?;
-            ctx.template.restore();
-            mem::replace(&mut ctx.template, prev)
+        let snapshot = ctx.style.clone();
+
+        let mut result = Node::empty();
+        let mut prev = ctx.style.clone();
+
+        for piece in self {
+            let node = piece.eval(ctx)?;
+
+            // If style properties of already started constructs changed,
+            // finish those constructs.
+            if ctx.style.page != prev.page {
+                result.lift(Level::Page, &prev);
+                prev.page = ctx.style.page.clone();
+            }
+
+            if ctx.style.par != prev.par {
+                result.lift(Level::Block, &prev);
+                prev.par = ctx.style.par.clone();
+            }
+
+            if ctx.style.text != prev.text {
+                prev.text = ctx.style.text.clone();
+            }
+
+            result += node;
+        }
+
+        ctx.style = snapshot;
+        Ok(result)
+    }
+}
+
+impl Eval for MarkupNode {
+    type Output = Node;
+
+    fn eval(&self, ctx: &mut EvalContext) -> TypResult<Self::Output> {
+        Ok(match self {
+            Self::Space => Node::Space,
+            Self::Linebreak(_) => Node::Linebreak,
+            Self::Parbreak(_) => Node::Parbreak,
+            Self::Strong(_) => {
+                ctx.style.text_mut().strong.flip();
+                Node::empty()
+            }
+            Self::Emph(_) => {
+                ctx.style.text_mut().emph.flip();
+                Node::empty()
+            }
+            Self::Text(text) => ctx.make_text(text),
+            Self::Raw(raw) => raw.eval(ctx)?,
+            Self::Heading(heading) => heading.eval(ctx)?,
+            Self::List(list) => list.eval(ctx)?,
+            Self::Enum(enum_) => enum_.eval(ctx)?,
+            Self::Expr(expr) => expr.eval(ctx)?.into_node(ctx),
         })
     }
+}
+
+impl Eval for RawNode {
+    type Output = Node;
+
+    fn eval(&self, ctx: &mut EvalContext) -> TypResult<Self::Output> {
+        let text = ctx.make_monospace_text(&self.text);
+        Ok(if self.block {
+            Node::Block(text.to_block(&ctx.style))
+        } else {
+            text
+        })
+    }
+}
+
+impl Eval for HeadingNode {
+    type Output = Node;
+
+    fn eval(&self, ctx: &mut EvalContext) -> TypResult<Self::Output> {
+        let prev = ctx.style.text.clone();
+        let text = ctx.style.text_mut();
+        let upscale = 1.6 - 0.1 * self.level as f64;
+        text.size *= upscale;
+        text.strong = true;
+
+        let node = self.body.eval(ctx)?;
+        ctx.style.text = prev;
+
+        Ok(Node::Block(node.to_block(&ctx.style)))
+    }
+}
+
+impl Eval for ListNode {
+    type Output = Node;
+
+    fn eval(&self, ctx: &mut EvalContext) -> TypResult<Self::Output> {
+        let label = Str::from('•');
+        labelled(ctx, label, &self.body)
+    }
+}
+
+impl Eval for EnumNode {
+    type Output = Node;
+
+    fn eval(&self, ctx: &mut EvalContext) -> TypResult<Self::Output> {
+        let label = format_str!("{}.", self.number.unwrap_or(1));
+        labelled(ctx, label, &self.body)
+    }
+}
+
+/// Evaluate a labelled list / enum.
+fn labelled(ctx: &mut EvalContext, label: Str, body: &Markup) -> TypResult<Node> {
+    // Create a horizontal stack containing the label, a bit of space and then
+    // the item's body.
+    Ok(Node::block(StackNode {
+        dir: ctx.style.par.dir,
+        children: vec![
+            StackChild::Any(ctx.make_text(label).to_block(&ctx.style), Align::Start),
+            StackChild::Spacing((ctx.style.text.size / 2.0).into()),
+            StackChild::Any(body.eval(ctx)?.to_block(&ctx.style), Align::Start),
+        ],
+    }))
 }
 
 impl Eval for Expr {
@@ -180,7 +289,7 @@ impl Eval for Expr {
             Self::Lit(v) => v.eval(ctx),
             Self::Array(v) => v.eval(ctx).map(Value::Array),
             Self::Dict(v) => v.eval(ctx).map(Value::Dict),
-            Self::Template(v) => v.eval(ctx).map(Value::Template),
+            Self::Template(v) => v.eval(ctx).map(Value::Node),
             Self::Group(v) => v.eval(ctx),
             Self::Block(v) => v.eval(ctx),
             Self::Call(v) => v.eval(ctx),
@@ -248,7 +357,7 @@ impl Eval for DictExpr {
 }
 
 impl Eval for TemplateExpr {
-    type Output = Template;
+    type Output = Node;
 
     fn eval(&self, ctx: &mut EvalContext) -> TypResult<Self::Output> {
         self.body.eval(ctx)
@@ -629,9 +738,7 @@ impl Eval for ImportExpr {
 
     fn eval(&self, ctx: &mut EvalContext) -> TypResult<Self::Output> {
         let path = self.path.eval(ctx)?.cast::<Str>().at(self.path.span())?;
-
-        let file = ctx.import(&path, self.path.span())?;
-        let module = &ctx.modules[&file];
+        let module = ctx.import(&path, self.path.span())?;
 
         match &self.imports {
             Imports::Wildcard => {
@@ -659,11 +766,8 @@ impl Eval for IncludeExpr {
 
     fn eval(&self, ctx: &mut EvalContext) -> TypResult<Self::Output> {
         let path = self.path.eval(ctx)?.cast::<Str>().at(self.path.span())?;
-
-        let file = ctx.import(&path, self.path.span())?;
-        let module = &ctx.modules[&file];
-
-        Ok(Value::Template(module.template.clone()))
+        let module = ctx.import(&path, self.path.span())?;
+        Ok(Value::Node(module.root))
     }
 }
 

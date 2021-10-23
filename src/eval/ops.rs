@@ -19,7 +19,7 @@ pub fn join(lhs: Value, rhs: Value) -> StrResult<Value> {
         (Str(a), Str(b)) => Str(a + b),
         (Array(a), Array(b)) => Array(a + b),
         (Dict(a), Dict(b)) => Dict(a + b),
-        (Template(a), Template(b)) => Template(a + b),
+        (Node(a), Node(b)) => Node(a + b),
         (a, b) => mismatch!("cannot join {} with {}", a, b),
     })
 }
@@ -79,7 +79,7 @@ pub fn add(lhs: Value, rhs: Value) -> StrResult<Value> {
         (Str(a), Str(b)) => Str(a + b),
         (Array(a), Array(b)) => Array(a + b),
         (Dict(a), Dict(b)) => Dict(a + b),
-        (Template(a), Template(b)) => Template(a + b),
+        (Node(a), Node(b)) => Node(a + b),
 
         (a, b) => mismatch!("cannot add {} and {}", a, b),
     })
@@ -150,8 +150,8 @@ pub fn mul(lhs: Value, rhs: Value) -> StrResult<Value> {
         (Int(a), Str(b)) => Str(b.repeat(a)?),
         (Array(a), Int(b)) => Array(a.repeat(b)?),
         (Int(a), Array(b)) => Array(b.repeat(a)?),
-        (Template(a), Int(b)) => Template(a.repeat(b)?),
-        (Int(a), Template(b)) => Template(b.repeat(a)?),
+        (Node(a), Int(b)) => Node(a.repeat(b)?),
+        (Int(a), Node(b)) => Node(b.repeat(a)?),
 
         (a, b) => mismatch!("cannot multiply {} with {}", a, b),
     })
@@ -266,7 +266,7 @@ pub fn equal(lhs: &Value, rhs: &Value) -> bool {
         (Str(a), Str(b)) => a == b,
         (Array(a), Array(b)) => a == b,
         (Dict(a), Dict(b)) => a == b,
-        (Template(a), Template(b)) => a == b,
+        (Node(_), Node(_)) => false,
         (Func(a), Func(b)) => a == b,
         (Dyn(a), Dyn(b)) => a == b,
 

@@ -23,66 +23,54 @@ pub fn page(ctx: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
     let bottom = args.named("bottom")?;
     let flip = args.named("flip")?;
 
-    ctx.template.modify(move |style| {
-        let page = style.page_mut();
+    let page = ctx.style.page_mut();
 
-        if let Some(paper) = paper {
-            page.class = paper.class();
-            page.size = paper.size();
-        }
+    if let Some(paper) = paper {
+        page.class = paper.class();
+        page.size = paper.size();
+    }
 
-        if let Some(width) = width {
-            page.class = PaperClass::Custom;
-            page.size.w = width;
-        }
+    if let Some(width) = width {
+        page.class = PaperClass::Custom;
+        page.size.w = width;
+    }
 
-        if let Some(height) = height {
-            page.class = PaperClass::Custom;
-            page.size.h = height;
-        }
+    if let Some(height) = height {
+        page.class = PaperClass::Custom;
+        page.size.h = height;
+    }
 
-        if let Some(margins) = margins {
-            page.margins = Sides::splat(Some(margins));
-        }
+    if let Some(margins) = margins {
+        page.margins = Sides::splat(Some(margins));
+    }
 
-        if let Some(left) = left {
-            page.margins.left = Some(left);
-        }
+    if let Some(left) = left {
+        page.margins.left = Some(left);
+    }
 
-        if let Some(top) = top {
-            page.margins.top = Some(top);
-        }
+    if let Some(top) = top {
+        page.margins.top = Some(top);
+    }
 
-        if let Some(right) = right {
-            page.margins.right = Some(right);
-        }
+    if let Some(right) = right {
+        page.margins.right = Some(right);
+    }
 
-        if let Some(bottom) = bottom {
-            page.margins.bottom = Some(bottom);
-        }
+    if let Some(bottom) = bottom {
+        page.margins.bottom = Some(bottom);
+    }
 
-        if flip.unwrap_or(false) {
-            std::mem::swap(&mut page.size.w, &mut page.size.h);
-        }
-    });
-
-    ctx.template.pagebreak(false);
+    if flip.unwrap_or(false) {
+        std::mem::swap(&mut page.size.w, &mut page.size.h);
+    }
 
     Ok(Value::None)
-}
-
-/// `pagebreak`: Start a new page.
-pub fn pagebreak(_: &mut EvalContext, _: &mut Args) -> TypResult<Value> {
-    let mut template = Template::new();
-    template.pagebreak(true);
-    Ok(Value::Template(template))
 }
 
 /// `align`: Configure the alignment along the layouting axes.
 pub fn align(ctx: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
     let first = args.eat::<Align>();
     let second = args.eat::<Align>();
-    let body = args.eat::<Template>();
 
     let mut horizontal = args.named("horizontal")?;
     let mut vertical = args.named("vertical")?;
@@ -99,84 +87,73 @@ pub fn align(ctx: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
         }
     }
 
-    let realign = |template: &mut Template| {
-        template.modify(move |style| {
-            if let Some(horizontal) = horizontal {
-                style.aligns.inline = horizontal;
-            }
+    if let Some(horizontal) = horizontal {
+        ctx.style.text_mut().align = horizontal;
+    }
 
-            if let Some(vertical) = vertical {
-                style.aligns.block = vertical;
-            }
-        });
+    if let Some(vertical) = vertical {
+        ctx.style.par_mut().align = vertical;
+    }
 
-        if vertical.is_some() {
-            template.parbreak();
-        }
-    };
+    Ok(Value::None)
+}
 
-    Ok(if let Some(body) = body {
-        let mut template = Template::new();
-        template.save();
-        realign(&mut template);
-        template += body;
-        template.restore();
-        Value::Template(template)
-    } else {
-        realign(&mut ctx.template);
-        Value::None
-    })
+/// `linebreak`: Start a new line.
+pub fn linebreak(_: &mut EvalContext, _: &mut Args) -> TypResult<Value> {
+    Ok(Value::Node(Node::Linebreak))
+}
+
+/// `parbreak`: Start a new paragraph.
+pub fn parbreak(_: &mut EvalContext, _: &mut Args) -> TypResult<Value> {
+    Ok(Value::Node(Node::Parbreak))
+}
+
+/// `pagebreak`: Start a new page.
+pub fn pagebreak(_: &mut EvalContext, _: &mut Args) -> TypResult<Value> {
+    Ok(Value::Node(Node::Pagebreak))
 }
 
 /// `h`: Horizontal spacing.
 pub fn h(_: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
     let spacing = args.expect("spacing")?;
-    let mut template = Template::new();
-    template.spacing(GenAxis::Inline, spacing);
-    Ok(Value::Template(template))
+    Ok(Value::Node(Node::Spacing(GenAxis::Inline, spacing)))
 }
 
 /// `v`: Vertical spacing.
 pub fn v(_: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
     let spacing = args.expect("spacing")?;
-    let mut template = Template::new();
-    template.spacing(GenAxis::Block, spacing);
-    Ok(Value::Template(template))
+    Ok(Value::Node(Node::Spacing(GenAxis::Block, spacing)))
 }
 
 /// `box`: Place content in a rectangular box.
-pub fn boxed(_: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
+pub fn boxed(ctx: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
     let width = args.named("width")?;
     let height = args.named("height")?;
     let fill = args.named("fill")?;
-    let body: Template = args.eat().unwrap_or_default();
-    Ok(Value::Template(Template::from_inline(move |style| {
-        ShapeNode {
-            shape: ShapeKind::Rect,
-            width,
-            height,
-            fill: fill.map(Paint::Color),
-            child: Some(body.to_stack(style).into()),
-        }
-    })))
+    let body: Node = args.eat().unwrap_or_default();
+    Ok(Value::inline(ShapeNode {
+        shape: ShapeKind::Rect,
+        width,
+        height,
+        fill: fill.map(Paint::Color),
+        child: Some(body.to_block(&ctx.style)),
+    }))
 }
 
 /// `block`: Place content in a block.
-pub fn block(_: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
-    let body: Template = args.expect("body")?;
-    Ok(Value::Template(Template::from_block(move |style| {
-        body.to_stack(style)
-    })))
+pub fn block(ctx: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
+    let body: Node = args.expect("body")?;
+    Ok(Value::block(body.to_block(&ctx.style)))
 }
 
 /// `pad`: Pad content at the sides.
-pub fn pad(_: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
+pub fn pad(ctx: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
     let all = args.eat();
     let left = args.named("left")?;
     let top = args.named("top")?;
     let right = args.named("right")?;
     let bottom = args.named("bottom")?;
-    let body: Template = args.expect("body")?;
+    let body: Node = args.expect("body")?;
 
     let padding = Sides::new(
         left.or(all).unwrap_or_default(),
@@ -185,19 +162,17 @@ pub fn pad(_: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
         bottom.or(all).unwrap_or_default(),
     );
 
-    Ok(Value::Template(Template::from_block(move |style| {
-        PadNode {
-            padding,
-            child: body.to_stack(&style).into(),
-        }
-    })))
+    Ok(Value::block(PadNode {
+        padding,
+        child: body.to_block(&ctx.style),
+    }))
 }
 
 /// `stack`: Stack children along an axis.
-pub fn stack(_: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
+pub fn stack(ctx: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
     enum Child {
         Spacing(Linear),
-        Any(Template),
+        Any(Node),
     }
 
     castable! {
@@ -205,42 +180,39 @@ pub fn stack(_: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
         Value::Length(v) => Self::Spacing(v.into()),
         Value::Relative(v) => Self::Spacing(v.into()),
         Value::Linear(v) => Self::Spacing(v),
-        Value::Template(v) => Self::Any(v),
+        Value::Node(v) => Self::Any(v),
     }
 
     let dir = args.named("dir")?.unwrap_or(Dir::TTB);
     let spacing = args.named::<Linear>("spacing")?;
-    let list: Vec<Child> = args.all().collect();
 
-    Ok(Value::Template(Template::from_block(move |style| {
-        let mut children = vec![];
-        let mut delayed = None;
+    let mut children = vec![];
+    let mut delayed = None;
 
-        // Build the list of stack children.
-        for child in &list {
-            match child {
-                Child::Spacing(v) => {
-                    children.push(StackChild::Spacing(*v));
-                    delayed = None;
+    // Build the list of stack children.
+    for child in args.all() {
+        match child {
+            Child::Spacing(v) => {
+                children.push(StackChild::Spacing(v));
+                delayed = None;
+            }
+            Child::Any(template) => {
+                if let Some(v) = delayed {
+                    children.push(StackChild::Spacing(v));
                 }
-                Child::Any(template) => {
-                    if let Some(v) = delayed {
-                        children.push(StackChild::Spacing(v));
-                    }
 
-                    let node = template.to_stack(style).into();
-                    children.push(StackChild::Any(node, style.aligns.block));
-                    delayed = spacing;
-                }
+                let node = template.to_block(&ctx.style);
+                children.push(StackChild::Any(node, ctx.style.par.align));
+                delayed = spacing;
             }
         }
+    }
 
-        StackNode { dir, children }
-    })))
+    Ok(Value::block(StackNode { dir, children }))
 }
 
 /// `grid`: Arrange children into a grid.
-pub fn grid(_: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
+pub fn grid(ctx: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
     castable! {
         Vec<TrackSizing>: "integer or (auto, linear, fractional, or array thereof)",
         Value::Auto => vec![TrackSizing::Auto],
@@ -276,16 +248,7 @@ pub fn grid(_: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
         row_gutter.unwrap_or(base_gutter),
     );
 
-    let children: Vec<Template> = args.all().collect();
+    let children = args.all().map(|node: Node| node.to_block(&ctx.style)).collect();
 
-    Ok(Value::Template(Template::from_block(move |style| {
-        GridNode {
-            tracks: tracks.clone(),
-            gutter: gutter.clone(),
-            children: children
-                .iter()
-                .map(|child| child.to_stack(&style).into())
-                .collect(),
-        }
-    })))
+    Ok(Value::block(GridNode { tracks, gutter, children }))
 }

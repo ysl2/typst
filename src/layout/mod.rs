@@ -91,7 +91,7 @@ pub trait PageLevel: Debug {
 }
 
 /// Layouts its children onto one or multiple pages.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PageNode {
     /// The size of the page.
     pub size: Size,

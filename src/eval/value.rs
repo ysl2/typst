@@ -3,9 +3,10 @@ use std::cmp::Ordering;
 use std::fmt::{self, Debug, Formatter};
 use std::rc::Rc;
 
-use super::{ops, Array, Dict, Function, Str, Template};
+use super::{ops, Array, Dict, EvalContext, Function, Node, Str};
 use crate::diag::StrResult;
 use crate::geom::{Angle, Color, Fractional, Length, Linear, Relative, RgbaColor};
+use crate::layout::{BlockNode, InlineNode};
 use crate::syntax::Spanned;
 use crate::util::EcoString;
 
@@ -40,8 +41,8 @@ pub enum Value {
     Array(Array),
     /// A dictionary value: `(color: #f79143, pattern: dashed)`.
     Dict(Dict),
-    /// A template value: `[*Hi* there]`.
-    Template(Template),
+    /// A node: `[*Hi* there]`.
+    Node(Node),
     /// An executable function.
     Func(Function),
     /// A dynamic value.
@@ -49,6 +50,16 @@ pub enum Value {
 }
 
 impl Value {
+    /// Create an inline-level node.
+    pub fn inline(node: impl Into<InlineNode>) -> Self {
+        Self::Node(Node::inline(node))
+    }
+
+    /// Create a block-level node.
+    pub fn block(node: impl Into<BlockNode>) -> Self {
+        Self::Node(Node::block(node))
+    }
+
     /// The name of the stored value's type.
     pub fn type_name(&self) -> &'static str {
         match self {
@@ -66,7 +77,7 @@ impl Value {
             Self::Str(_) => Str::TYPE_NAME,
             Self::Array(_) => Array::TYPE_NAME,
             Self::Dict(_) => Dict::TYPE_NAME,
-            Self::Template(_) => Template::TYPE_NAME,
+            Self::Node(_) => Node::TYPE_NAME,
             Self::Func(_) => Function::TYPE_NAME,
             Self::Dyn(v) => v.type_name(),
         }
@@ -97,6 +108,21 @@ impl Value {
     pub fn join(self, rhs: Self) -> StrResult<Self> {
         ops::join(self, rhs)
     }
+
+    /// Convert the value into a node. If it is not already a node, a
+    /// representation suitable for user-facing display is produced.
+    pub fn into_node(self, ctx: &EvalContext) -> Node {
+        match self {
+            Value::None => Node::empty(),
+            Value::Int(v) => ctx.make_text(format_str!("{}", v)),
+            Value::Float(v) => ctx.make_text(format_str!("{}", v)),
+            Value::Str(v) => ctx.make_text(v),
+            Value::Node(v) => v,
+            // For values which can't be shown "naturally", we print the
+            // representation in monospace.
+            v => ctx.make_monospace_text(v.repr()),
+        }
+    }
 }
 
 impl Default for Value {
@@ -122,7 +148,7 @@ impl Debug for Value {
             Self::Str(v) => Debug::fmt(v, f),
             Self::Array(v) => Debug::fmt(v, f),
             Self::Dict(v) => Debug::fmt(v, f),
-            Self::Template(v) => Debug::fmt(v, f),
+            Self::Node(v) => Debug::fmt(v, f),
             Self::Func(v) => Debug::fmt(v, f),
             Self::Dyn(v) => Debug::fmt(v, f),
         }
@@ -182,6 +208,7 @@ impl From<Dynamic> for Value {
         Self::Dyn(v)
     }
 }
+
 /// A dynamic value.
 #[derive(Clone)]
 pub struct Dynamic(Rc<dyn Bounds>);
@@ -409,7 +436,7 @@ primitive! { Color: "color", Color }
 primitive! { Str: "string", Str }
 primitive! { Array: "array", Array }
 primitive! { Dict: "dictionary", Dict }
-primitive! { Template: "template", Template }
+primitive! { Node: "node", Node }
 primitive! { Function: "function", Func }
 
 #[cfg(test)]

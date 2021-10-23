@@ -57,12 +57,6 @@ fn bench_eval(iai: &mut Iai) {
     iai.run(|| eval(&mut ctx, id, &ast).unwrap());
 }
 
-fn bench_to_tree(iai: &mut Iai) {
-    let (mut ctx, id) = context();
-    let module = ctx.evaluate(id).unwrap();
-    iai.run(|| module.template.to_pages(ctx.style()));
-}
-
 fn bench_layout(iai: &mut Iai) {
     let (mut ctx, id) = context();
     let tree = ctx.execute(id).unwrap();
@@ -75,6 +69,5 @@ main!(
     bench_tokenize,
     bench_parse,
     bench_eval,
-    bench_to_tree,
     bench_layout
 );

@@ -7,12 +7,10 @@
 //!   found in the [syntax] module.
 //! - **Evaluation:** The next step is to [evaluate] the markup. This produces a
 //!   [module], consisting of a scope of values that were exported by the code
-//!   and a template with the contents of the module. This template can be
-//!   instantiated with a style to produce a layout tree, a high-level, fully
-//!   styled representation of the document. The nodes of this tree are
-//!   self-contained and order-independent and thus much better suited for
-//!   layouting than the raw markup.
-//! - **Layouting:** Next, the tree is [layouted] into a portable version of the
+//!   and a [layoutable node] with the contents of the module. This node is
+//!   self-contained and fully styled and thus much better suited for layouting
+//!   than the raw markup.
+//! - **Layouting:** Next, the node is [layouted] into a portable version of the
 //!   typeset document. The output of this is a collection of [`Frame`]s (one
 //!   per page), ready for exporting.
 //! - **Exporting:** The finished layout can be exported into a supported
@@ -23,7 +21,7 @@
 //! [markup]: syntax::Markup
 //! [evaluate]: eval::eval
 //! [module]: eval::Module
-//! [layout tree]: layout::LayoutTree
+//! [layoutable node]: eval::Node
 //! [layouted]: layout::layout
 //! [PDF]: export::pdf
 
@@ -112,7 +110,7 @@ impl Context {
     /// Execute a source file and produce the resulting page nodes.
     pub fn execute(&mut self, id: SourceId) -> TypResult<Vec<PageNode>> {
         let module = self.evaluate(id)?;
-        Ok(module.template.to_pages(&self.style))
+        Ok(module.root.to_pages(&self.style))
     }
 
     /// Typeset a source file into a collection of layouted frames.

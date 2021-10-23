@@ -12,7 +12,7 @@ use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
 use std::rc::Rc;
 
-/// Additional methods for booleans.
+/// Additional methods for [`bool`].
 pub trait BoolExt {
     /// Toggle the value of the bool in place.
     fn flip(&mut self);
@@ -24,7 +24,7 @@ impl BoolExt for bool {
     }
 }
 
-/// Additional methods for options.
+/// Additional methods for [`Option<T>`].
 pub trait OptionExt<T> {
     /// Replace `self` with `other` if `self` is `Some`.
     fn and_set(&mut self, other: Option<T>);
@@ -68,7 +68,7 @@ impl<T> OptionExt<T> for Option<T> {
     }
 }
 
-/// Additional methods for reference-counted pointers.
+/// Additional methods for [`Rc<T>`].
 pub trait RcExt<T> {
     /// Takes the inner value if there is exactly one strong reference and
     /// clones it otherwise.
@@ -87,7 +87,7 @@ where
     }
 }
 
-/// Additional methods for slices.
+/// Additional methods for [`[T]`](slice).
 pub trait SliceExt<T> {
     /// Split a slice into consecutive groups with the same key.
     ///
@@ -189,7 +189,7 @@ impl PathExt for Path {
     }
 }
 
-/// Additional methods for [`RefMut`].
+/// Additional methods for [`RefMut<T>`].
 pub trait RefMutExt<'a, T> {
     fn try_map<U, F, E>(orig: Self, f: F) -> Result<RefMut<'a, U>, E>
     where

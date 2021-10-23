@@ -17,11 +17,11 @@ use std::convert::TryFrom;
 use std::rc::Rc;
 
 use crate::diag::{At, TypResult};
-use crate::eval::{Args, Array, EvalContext, Scope, Str, Template, Value};
+use crate::eval::{Args, Array, EvalContext, Node, Scope, Str, Value};
 use crate::font::{FontFamily, FontStretch, FontStyle, FontWeight, VerticalFontMetric};
 use crate::geom::*;
-use crate::style::Style;
 use crate::syntax::{Span, Spanned};
+use crate::util::EcoString;
 
 /// Construct a scope containing all standard library definitions.
 pub fn new() -> Scope {
@@ -38,10 +38,12 @@ pub fn new() -> Scope {
 
     // Layout.
     std.def_func("page", page);
+    std.def_func("align", align);
+    std.def_func("linebreak", linebreak);
+    std.def_func("parbreak", parbreak);
     std.def_func("pagebreak", pagebreak);
     std.def_func("h", h);
     std.def_func("v", v);
-    std.def_func("align", align);
     std.def_func("box", boxed);
     std.def_func("block", block);
     std.def_func("pad", pad);

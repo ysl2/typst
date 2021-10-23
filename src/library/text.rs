@@ -46,66 +46,58 @@ pub fn font(ctx: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
     let sans_serif = args.named("sans-serif")?;
     let monospace = args.named("monospace")?;
     let fallback = args.named("fallback")?;
-    let body = args.eat::<Template>();
 
-    let f = move |style_: &mut Style| {
-        let text = style_.text_mut();
+    let text = ctx.style.text_mut();
 
-        if let Some(size) = size {
-            text.size = size.resolve(text.size);
-        }
+    if let Some(size) = size {
+        text.size = size.resolve(text.size);
+    }
 
-        if let Some(style) = style {
-            text.variant.style = style;
-        }
+    if let Some(style) = style {
+        text.variant.style = style;
+    }
 
-        if let Some(weight) = weight {
-            text.variant.weight = weight;
-        }
+    if let Some(weight) = weight {
+        text.variant.weight = weight;
+    }
 
-        if let Some(stretch) = stretch {
-            text.variant.stretch = stretch;
-        }
+    if let Some(stretch) = stretch {
+        text.variant.stretch = stretch;
+    }
 
-        if let Some(top_edge) = top_edge {
-            text.top_edge = top_edge;
-        }
+    if let Some(top_edge) = top_edge {
+        text.top_edge = top_edge;
+    }
 
-        if let Some(bottom_edge) = bottom_edge {
-            text.bottom_edge = bottom_edge;
-        }
+    if let Some(bottom_edge) = bottom_edge {
+        text.bottom_edge = bottom_edge;
+    }
 
-        if let Some(fill) = fill {
-            text.fill = Paint::Color(fill);
-        }
+    if let Some(fill) = fill {
+        text.fill = Paint::Color(fill);
+    }
 
-        if let Some(FontDef(list)) = &list {
-            text.families_mut().list = list.clone();
-        }
+    if let Some(FontDef(list)) = &list {
+        text.families_mut().list = list.clone();
+    }
 
-        if let Some(FamilyDef(serif)) = &serif {
-            text.families_mut().serif = serif.clone();
-        }
+    if let Some(FamilyDef(serif)) = &serif {
+        text.families_mut().serif = serif.clone();
+    }
 
-        if let Some(FamilyDef(sans_serif)) = &sans_serif {
-            text.families_mut().sans_serif = sans_serif.clone();
-        }
+    if let Some(FamilyDef(sans_serif)) = &sans_serif {
+        text.families_mut().sans_serif = sans_serif.clone();
+    }
 
-        if let Some(FamilyDef(monospace)) = &monospace {
-            text.families_mut().monospace = monospace.clone();
-        }
+    if let Some(FamilyDef(monospace)) = &monospace {
+        text.families_mut().monospace = monospace.clone();
+    }
 
-        if let Some(fallback) = fallback {
-            text.fallback = fallback;
-        }
-    };
+    if let Some(fallback) = fallback {
+        text.fallback = fallback;
+    }
 
-    Ok(if let Some(body) = body {
-        Value::Template(body.modified(f))
-    } else {
-        ctx.template.modify(f);
-        Value::None
-    })
+    Ok(Value::None)
 }
 
 /// `par`: Configure paragraphs.
@@ -113,19 +105,15 @@ pub fn par(ctx: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
     let spacing = args.named("spacing")?;
     let leading = args.named("leading")?;
 
-    ctx.template.modify(move |style| {
-        let par = style.par_mut();
+    let par = ctx.style.par_mut();
 
-        if let Some(spacing) = spacing {
-            par.spacing = spacing;
-        }
+    if let Some(spacing) = spacing {
+        par.spacing = spacing;
+    }
 
-        if let Some(leading) = leading {
-            par.leading = leading;
-        }
-    });
-
-    ctx.template.parbreak();
+    if let Some(leading) = leading {
+        par.leading = leading;
+    }
 
     Ok(Value::None)
 }
@@ -144,10 +132,8 @@ pub fn lang(ctx: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
     };
 
     if let Some(dir) = dir {
-        ctx.template.modify(move |style| style.dir = dir);
+        ctx.style.par_mut().dir = dir;
     }
-
-    ctx.template.parbreak();
 
     Ok(Value::None)
 }
@@ -181,9 +167,9 @@ fn line_impl(args: &mut Args, kind: LineKind) -> TypResult<Value> {
     let thickness = args.named::<Linear>("thickness")?.or_else(|| args.eat());
     let offset = args.named("offset")?;
     let extent = args.named("extent")?.unwrap_or_default();
-    let body: Template = args.expect("body")?;
+    let body: Node = args.expect("body")?;
 
-    Ok(Value::Template(body.decorate(Decoration::Line(
+    Ok(Value::Node(body.decorate(Decoration::Line(
         LineDecoration {
             kind,
             stroke: stroke.map(Paint::Color),
@@ -195,13 +181,11 @@ fn line_impl(args: &mut Args, kind: LineKind) -> TypResult<Value> {
 }
 
 /// `link`: Typeset text as a link.
-pub fn link(_: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
-    let url = args.expect::<Str>("url")?;
-    let body = args.eat().unwrap_or_else(|| {
-        let mut template = Template::new();
-        template.text(&url);
-        template
-    });
+pub fn link(ctx: &mut EvalContext, args: &mut Args) -> TypResult<Value> {
+    let url: EcoString = args.expect::<Str>("url")?.into();
+    let body = args
+        .eat()
+        .unwrap_or_else(|| Node::Text(url.clone(), ctx.style.text.clone()));
 
-    Ok(Value::Template(body.decorate(Decoration::Link(url.into()))))
+    Ok(Value::Node(body.decorate(Decoration::Link(url))))
 }
