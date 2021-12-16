@@ -28,6 +28,7 @@ pdf-writer = "0.4"
 rustybuzz = "0.4"
 serde = { version = "1", features = ["derive", "rc"] }
 ttf-parser = "0.12"
+typst-macros = { path = "./macros" }
 unicode-bidi = "0.3.5"
 unicode-segmentation = "1"
 unicode-xid = "0.2"
