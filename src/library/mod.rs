@@ -4,6 +4,7 @@
 //! definitions.
 
 mod align;
+mod columns;
 mod document;
 mod flow;
 mod grid;
@@ -41,6 +42,7 @@ mod prelude {
 
 pub use self::image::*;
 pub use align::*;
+pub use columns::*;
 pub use document::*;
 pub use flow::*;
 pub use grid::*;
