@@ -7,6 +7,8 @@ use typst::parse::{parse, Scanner, TokenMode, Tokens};
 use typst::source::SourceId;
 use typst::{Context, Vm};
 
+mod commands;
+
 const SRC: &str = include_str!("bench.typ");
 const FONT: &[u8] = include_bytes!("../fonts/IBMPlexSans-Regular.ttf");
 
@@ -64,7 +66,7 @@ fn bench_parse(iai: &mut Iai) {
 
 fn bench_edit(iai: &mut Iai) {
     let (mut ctx, id) = context();
-    iai.run(|| black_box(ctx.sources.edit(id, 1168 .. 1171, "_Uhr_")));
+    iai.run(|| black_box(ctx.sources.edit(id, 57 .. 58, "_Uhr_")));
 }
 
 fn bench_eval(iai: &mut Iai) {

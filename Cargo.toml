@@ -36,7 +36,7 @@ xi-unicode = "0.3"
 
 # Raster and vector graphics handling
 image = { version = "0.23", default-features = false, features = ["png", "jpeg"] }
-usvg = { version = "0.20", default-features = false }
+usvg = { version = "0.22", default-features = false }
 
 # External implementation of user-facing features
 syntect = { version = "4.6", default-features = false, features = ["dump-load", "parsing", "regex-fancy", "assets"] }
@@ -49,7 +49,7 @@ svg2pdf = "0.2"
 # Raster export / rendering
 tiny-skia = "0.6.2"
 pixglyph = { git = "https://github.com/typst/pixglyph" }
-resvg = { version = "0.20", default-features = false }
+resvg = { version = "0.22", default-features = false }
 roxmltree = "0.14"
 flate2 = "1"
 
