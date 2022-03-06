@@ -105,13 +105,21 @@ fn bench_byte_to_utf16(iai: &mut Iai) {
 
 fn bench_lab(iai: &mut Iai) {
     let lab = lab::Lab::new(SRC);
-    let mut iter = lab.iter();
 
     let loader = MemLoader::new().with(Path::new("font.ttf"), FONT).wrap();
     let mut ctx = Context::new(loader);
-    let id = ctx.sources.provide(Path::new("src.typ"), iter.next().unwrap());
+    let id = ctx.sources.provide(Path::new("src.typ"), lab.source().to_string());
+    let mut vm = Vm::new(&mut ctx);
+    let module = vm.evaluate(id).unwrap();
+    module.template.layout_pages(&mut vm).unwrap();
 
-    iai.run(|| {});
+    iai.run(|| {
+        for change in lab.iter() {
+            vm.sources.edit(id, change.range, &change.content);
+            let module = vm.evaluate(id).unwrap();
+            black_box(module.template.layout_pages(&mut vm).unwrap());
+        }
+    });
 }
 
 fn bench_render(iai: &mut Iai) {

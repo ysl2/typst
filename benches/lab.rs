@@ -1,3 +1,4 @@
+use std::ops::Range;
 use typst::parse::{is_newline, Scanner};
 
 /// The comment prefix that indicates commands.
@@ -29,8 +30,48 @@ impl CommandKind {
 struct CommandParameters {
     /// A last step will be added where the area reverts to its initial state.
     undo: bool,
-    /// The command will be executed one character at a time, as to simulate typing.
+    /// The command will be executed one character at a time, as to simulate
+    /// typing.
     typing: bool,
+}
+
+/// A change to a string, expressed by a range to replace with some content.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Change {
+    /// The range in the original string to be replaced.
+    pub range: Range<usize>,
+    /// What to replace the content in the range with.
+    pub content: String,
+}
+
+impl Change {
+    /// Create a new change.
+    pub fn new(range: Range<usize>, content: String) -> Self {
+        Self { range, content }
+    }
+
+    /// Create a new insertion at an index in the original string.
+    pub fn insert(pos: usize, content: String) -> Self {
+        Self { range: pos .. pos, content }
+    }
+
+    /// Delete the text in the range.
+    pub fn clear(range: Range<usize>) -> Self {
+        Self { range, content: String::new() }
+    }
+
+    /// Map the replacement range with some function.
+    pub fn map_range<F>(&mut self, mut f: F)
+    where
+        F: FnMut(usize) -> usize,
+    {
+        self.range = f(self.range.start) .. f(self.range.end)
+    }
+
+    /// The total length delta the change causes.
+    pub fn len(&self) -> isize {
+        self.content.len() as isize - self.range.len() as isize
+    }
 }
 
 /// A command for modification over time in the source code.
@@ -80,54 +121,71 @@ impl Command {
     /// The total number of states this command can run through.
     fn states(&self) -> usize {
         let res = match (&self.kind, self.is_typing()) {
-            (CommandKind::Replace(_), false) => 3,
-            (_, false) => 2,
-            (c, true) => self.payload_chars + c.param().map(str::len).unwrap_or(0) + 1,
+            (CommandKind::Replace(_), false) => 2,
+            (_, false) => 1,
+            (c, true) => self.payload_chars + c.param().map(str::len).unwrap_or(0),
         };
 
         if self.is_undo() { res + 1 } else { res }
     }
 
+    /// The initial state of the document when the command has not yet made a
+    /// change.
+    fn initial<'s>(&'s self) -> &'s str {
+        match self.kind {
+            CommandKind::Delete | CommandKind::Replace(_) => &self.payload,
+            CommandKind::Insert => "",
+        }
+    }
+
     /// Retrieve a particular state of the command.
-    fn step(&self, step: usize) -> Option<String> {
+    fn step(&self, step: usize) -> Option<Change> {
         let mut res = None;
 
         match (&self.kind, self.is_typing()) {
-            (CommandKind::Insert, true) if step <= self.payload_chars => {
-                res = Some(self.payload.chars().take(step).collect());
+            (CommandKind::Insert, true) if step < self.payload_chars => {
+                let (offset, c) = self.payload.char_indices().nth(step).unwrap();
+                let pos = self.start + offset;
+
+                res = Some(Change::insert(pos, c.into()));
             }
-            (CommandKind::Insert, false) => {
-                if step == 1 {
-                    res = Some(self.payload.clone());
-                } else if step == 0 {
-                    res = Some(String::new());
-                }
+            (CommandKind::Insert, false) if step == 0 => {
+                res = Some(Change::insert(self.start, self.payload.clone()));
             }
-            (CommandKind::Delete, true) if step <= self.payload_chars => {
-                res =
-                    Some(self.payload.chars().take(self.payload_chars - step).collect());
+            (CommandKind::Delete, true) if step < self.payload_chars => {
+                let (idx, c) = self.payload.char_indices().rev().nth(step).unwrap();
+                let pos = self.start + idx;
+
+                res = Some(Change::clear(pos .. pos + c.len_utf8()));
             }
-            (CommandKind::Delete, false) => {
-                if step == 1 {
-                    res = Some(String::new());
-                } else if step == 0 {
-                    res = Some(self.payload.clone());
-                }
+            (CommandKind::Delete, false) if step == 0 => {
+                res = Some(Change::clear(self.start .. self.start + self.payload.len()))
             }
             (CommandKind::Replace(replace), true) => {
                 let replace_count = replace.chars().count();
 
-                if step <= self.payload_chars + replace_count {
-                    res = Some(if step <= self.payload_chars {
-                        self.payload.chars().take(self.payload_chars - step).collect()
+                if step < self.payload_chars + replace_count {
+                    res = Some(if step < self.payload_chars {
+                        let (idx, c) =
+                            self.payload.char_indices().rev().nth(step).unwrap();
+                        let pos = self.start + idx;
+
+                        Change::clear(pos .. pos + c.len_utf8())
                     } else {
                         let remaining = step - self.payload_chars;
-                        replace.chars().take(remaining).collect()
+                        let (offset, c) = replace.char_indices().nth(remaining).unwrap();
+                        let pos = self.start + offset;
+
+                        Change::insert(pos, c.into())
                     });
                 }
             }
-            (CommandKind::Replace(replace), false) if step <= 2 => {
-                res = Some(if step == 1 { String::new() } else { replace.clone() });
+            (CommandKind::Replace(replace), false) if step <= 1 => {
+                res = Some(if step == 0 {
+                    Change::clear(self.start .. self.start + self.payload.len())
+                } else {
+                    Change::insert(self.start, replace.clone())
+                });
             }
             _ => {}
         };
@@ -135,9 +193,16 @@ impl Command {
         if self.is_undo() && step + 1 == self.states() {
             // Return the initial state.
 
-            return Some(match self.kind {
-                CommandKind::Insert => String::new(),
-                CommandKind::Delete | CommandKind::Replace(_) => self.payload.clone(),
+            return Some(match &self.kind {
+                CommandKind::Insert => {
+                    Change::clear(self.start .. self.start + self.payload.len())
+                }
+                CommandKind::Delete => {
+                    Change::new(self.start .. self.start, self.payload.clone())
+                }
+                CommandKind::Replace(r) => {
+                    Change::new(self.start .. self.start + r.len(), self.payload.clone())
+                }
             });
         }
 
@@ -157,8 +222,6 @@ struct CommandIterator<'s> {
     command: &'s Command,
     /// The next step index when moving forward through the iterator.
     step: usize,
-    /// The last step index when moving backwards through the iterator.
-    step_back: usize,
     /// The total amount of steps in the iterator.
     len: usize,
 }
@@ -167,15 +230,15 @@ impl<'s> CommandIterator<'s> {
     /// Create a new command iterator.
     fn new(command: &'s Command) -> Self {
         let len = command.states();
-        Self { command, step: 0, step_back: len, len }
+        Self { command, step: 0, len }
     }
 }
 
 impl<'s> Iterator for CommandIterator<'s> {
-    type Item = String;
+    type Item = Change;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.step > self.step_back {
+        if self.step >= self.len {
             return None;
         }
 
@@ -197,20 +260,8 @@ impl<'s> Iterator for CommandIterator<'s> {
 
 impl<'s> ExactSizeIterator for CommandIterator<'s> {}
 
-impl<'s> DoubleEndedIterator for CommandIterator<'s> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        if self.step > self.step_back {
-            return None;
-        }
-
-        let res = self.command.step(self.step_back);
-        self.step_back -= 1;
-        res
-    }
-}
-
 impl<'s> IntoIterator for &'s Command {
-    type Item = String;
+    type Item = Change;
     type IntoIter = CommandIterator<'s>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -241,12 +292,18 @@ impl Lab {
         while !s.eof() {
             source.push_str(until_newstart(&mut s));
             if let Some(command) = command(&mut s, source.len()) {
+                source.push_str(command.initial());
                 commands.push(command);
             }
         }
 
         source.shrink_to_fit();
         Lab { source, commands }
+    }
+
+    /// Return a reference to the source, freed of commands.
+    pub fn source<'s>(&'s self) -> &'s str {
+        &self.source
     }
 
     /// Return an iterator for the various command states of the file.
@@ -263,7 +320,9 @@ pub struct LabIterator<'s> {
     /// Command iterators derived from the lab's commands.
     command_iterators: Vec<CommandIterator<'s>>,
     /// The highest step number each command is defined for.
-    max_step: Vec<usize>,
+    states: Vec<usize>,
+    /// The offset that each command produces.
+    offsets: Vec<isize>,
     /// The current position of the iterator.
     step: usize,
 }
@@ -272,47 +331,54 @@ impl<'s> LabIterator<'s> {
     /// Create a new iterator.
     fn new(lab: &'s Lab) -> Self {
         let command_iterators: Vec<_> = lab.commands.iter().map(Command::iter).collect();
-        let steps = command_iterators.iter().map(|i| i.len() - 1).collect();
+        let states = command_iterators.iter().map(|i| i.len()).collect();
+        let offsets = vec![0; lab.commands.len()];
         Self {
             lab,
             command_iterators,
-            max_step: steps,
+            states,
+            offsets,
             step: 0,
         }
     }
 }
 
 impl<'s> Iterator for LabIterator<'s> {
-    type Item = String;
+    type Item = Change;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.step > self.max_step.iter().sum() {
+        if self.step >= self.states.iter().sum() {
             return None;
         }
 
         let mut available_steps = self.step;
-        let mut offset = 0;
-        let mut res = self.lab.source.clone();
 
         for (i, mut command_iter) in self.command_iterators.iter().copied().enumerate() {
-            let position = self.lab.commands[i].start + offset;
-            let steps = self.max_step[i].min(available_steps);
+            println!(
+                "available: {}, states {}, command {:?}",
+                available_steps, self.states[i], self.lab.commands[i].kind
+            );
 
-            let insertion = command_iter.nth(steps).unwrap();
+            if available_steps >= self.states[i] {
+                available_steps -= self.states[i];
+                continue;
+            }
 
-            available_steps -= steps;
-            offset += insertion.len();
+            let mut change = command_iter.nth(available_steps).unwrap();
+            *self.offsets.get_mut(i).unwrap() += change.len();
+            change.map_range(|x| {
+                (x as isize + self.offsets.iter().take(i).sum::<isize>()) as usize
+            });
 
-            res.insert_str(position, &insertion);
+            self.step += 1;
+            return Some(change);
         }
 
-        self.step += 1;
-
-        Some(res)
+        unreachable!()
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let res = self.max_step.iter().sum();
+        let res = self.states.iter().sum();
         (res, Some(res))
     }
 }
@@ -320,7 +386,7 @@ impl<'s> Iterator for LabIterator<'s> {
 impl<'s> ExactSizeIterator for LabIterator<'s> {}
 
 impl<'s> IntoIterator for &'s Lab {
-    type Item = String;
+    type Item = Change;
     type IntoIter = LabIterator<'s>;
 
     fn into_iter(self) -> Self::IntoIter {
