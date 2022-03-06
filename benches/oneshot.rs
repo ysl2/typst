@@ -7,7 +7,7 @@ use typst::parse::{parse, Scanner, TokenMode, Tokens};
 use typst::source::SourceId;
 use typst::{Context, Vm};
 
-mod commands;
+mod lab;
 
 const SRC: &str = include_str!("bench.typ");
 const FONT: &[u8] = include_bytes!("../fonts/IBMPlexSans-Regular.ttf");
@@ -27,6 +27,7 @@ main!(
     bench_edit,
     bench_eval,
     bench_layout,
+    bench_lab,
     bench_highlight,
     bench_byte_to_utf16,
     bench_render,
@@ -100,6 +101,17 @@ fn bench_byte_to_utf16(iai: &mut Iai) {
                 .. source.byte_to_utf16(range.end))
             .collect::<Vec<_>>()
     });
+}
+
+fn bench_lab(iai: &mut Iai) {
+    let lab = lab::Lab::new(SRC);
+    let mut iter = lab.iter();
+
+    let loader = MemLoader::new().with(Path::new("font.ttf"), FONT).wrap();
+    let mut ctx = Context::new(loader);
+    let id = ctx.sources.provide(Path::new("src.typ"), iter.next().unwrap());
+
+    iai.run(|| {});
 }
 
 fn bench_render(iai: &mut Iai) {
