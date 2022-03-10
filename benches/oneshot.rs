@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use iai::{black_box, main, Iai};
 
@@ -9,12 +10,28 @@ use typst::{Context, Vm};
 
 mod lab;
 
-const SRC: &str = include_str!("bench.typ");
+const SRC: &str = include_str!("bench_paper.typ");
 const FONT: &[u8] = include_bytes!("../fonts/IBMPlexSans-Regular.ttf");
+const LBR: &[u8] = include_bytes!("../fonts/LinBiolinum_Rah.ttf");
+const LBB: &[u8] = include_bytes!("../fonts/LinBiolinum_RIah.ttf");
+const LBI: &[u8] = include_bytes!("../fonts/LinBiolinum_RBah.ttf");
+const LLR: &[u8] = include_bytes!("../fonts/LinLibertine_Rah.ttf");
+const LLB: &[u8] = include_bytes!("../fonts/LinLibertine_RIah.ttf");
+const LLI: &[u8] = include_bytes!("../fonts/LinLibertine_RBah.ttf");
+
+fn loader() -> Arc<MemLoader> {
+    let mut loader = MemLoader::new().with(Path::new("font.ttf"), FONT);
+    loader.insert("LinBiolinum_regular.ttf", LBR);
+    loader.insert("LinBiolinum_italic.ttf", LBI);
+    loader.insert("LinBiolinum_bold.ttf", LBB);
+    loader.insert("LinLibertine_regular.ttf", LLR);
+    loader.insert("LinLibertine_italic.ttf", LLI);
+    loader.insert("LinLibertine_bold.ttf", LLB);
+    loader.wrap()
+}
 
 fn context() -> (Context, SourceId) {
-    let loader = MemLoader::new().with(Path::new("font.ttf"), FONT).wrap();
-    let mut ctx = Context::new(loader);
+    let mut ctx = Context::new(loader());
     let id = ctx.sources.provide(Path::new("src.typ"), SRC.to_string());
     (ctx, id)
 }
@@ -27,7 +44,9 @@ main!(
     bench_edit,
     bench_eval,
     bench_layout,
+    bench_cal,
     bench_lab,
+    bench_full,
     bench_highlight,
     bench_byte_to_utf16,
     bench_render,
@@ -103,11 +122,19 @@ fn bench_byte_to_utf16(iai: &mut Iai) {
     });
 }
 
+fn bench_cal(iai: &mut Iai) {
+    let lab = lab::Lab::new(SRC);
+    iai.run(|| {
+        for _ in lab.iter() {
+            continue;
+        }
+    });
+}
+
 fn bench_lab(iai: &mut Iai) {
     let lab = lab::Lab::new(SRC);
 
-    let loader = MemLoader::new().with(Path::new("font.ttf"), FONT).wrap();
-    let mut ctx = Context::new(loader);
+    let mut ctx = Context::new(loader());
     let id = ctx.sources.provide(Path::new("src.typ"), lab.source().to_string());
     let mut vm = Vm::new(&mut ctx);
     let module = vm.evaluate(id).unwrap();
@@ -117,9 +144,16 @@ fn bench_lab(iai: &mut Iai) {
         for change in lab.iter() {
             vm.sources.edit(id, change.range, &change.content);
             let module = vm.evaluate(id).unwrap();
-            black_box(module.template.layout_pages(&mut vm).unwrap());
+            module.template.layout_pages(&mut vm).unwrap();
         }
     });
+}
+
+fn bench_full(iai: &mut Iai) {
+    iai.run(|| {
+        let (mut ctx, id) = context();
+        ctx.typeset(id).unwrap();
+    })
 }
 
 fn bench_render(iai: &mut Iai) {

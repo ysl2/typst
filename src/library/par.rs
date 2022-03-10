@@ -90,6 +90,8 @@ impl Layout for ParNode {
         regions: &Regions,
         styles: StyleChain,
     ) -> TypResult<Vec<Constrained<Arc<Frame>>>> {
+        println!("doing new par\n\tregion: {:?}", regions.current);
+
         // Collect all text into one string used for BiDi analysis.
         let text = self.collect_text();
         let level = Level::from_dir(styles.get(Self::DIR));
@@ -151,16 +153,26 @@ impl Layout for ParNode {
         let mut regions = regions.clone();
         let mut finished = vec![];
         let mut first = true;
+
+        let mut base_height = regions.base.y;
         let mut output = Frame::new(Size::with_x(width));
-        let mut cts = Constraints::tight(&regions);
+        let new_cts = |regions: &Regions| {
+            let mut cts = Constraints::new(regions.expand);
+            cts.exact.x = Some(regions.current.x);
+            cts
+        };
+
+        let mut cts = new_cts(&regions);
 
         // Stack the lines into one frame per region.
         for line in lines {
             while !regions.current.y.fits(line.size.y) && !regions.in_last() {
+                cts.max.y = Some(base_height + line.size.y);
                 finished.push(output.constrain(cts));
                 output = Frame::new(Size::with_x(width));
                 regions.next();
-                cts = Constraints::tight(&regions);
+                base_height = regions.current.y;
+                cts = new_cts(&regions);
                 first = true;
             }
 
@@ -172,6 +184,7 @@ impl Layout for ParNode {
             let pos = Point::with_y(output.size.y);
             output.size.y += frame.size.y;
             output.merge_frame(pos, frame);
+            cts.min.y = Some(output.size.y);
 
             regions.current.y -= line.size.y + leading;
             first = false;

@@ -354,11 +354,6 @@ impl<'s> Iterator for LabIterator<'s> {
         let mut available_steps = self.step;
 
         for (i, mut command_iter) in self.command_iterators.iter().copied().enumerate() {
-            println!(
-                "available: {}, states {}, command {:?}",
-                available_steps, self.states[i], self.lab.commands[i].kind
-            );
-
             if available_steps >= self.states[i] {
                 available_steps -= self.states[i];
                 continue;
