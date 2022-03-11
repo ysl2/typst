@@ -89,7 +89,6 @@ impl Layout for ParNode {
         regions: &Regions,
         styles: StyleChain,
     ) -> TypResult<Vec<Constrained<Arc<Frame>>>> {
-        println!("doing new par\n\tregion: {:?}", regions.current);
 
         // Collect all text into one string used for BiDi analysis.
         let text = self.collect_text();

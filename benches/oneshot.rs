@@ -139,9 +139,11 @@ fn bench_lab(iai: &mut Iai) {
     let mut vm = Vm::new(&mut ctx);
     let module = vm.evaluate(id).unwrap();
     module.template.layout_pages(&mut vm).unwrap();
+    vm.modules.clear();
 
     iai.run(|| {
         for change in lab.iter() {
+            vm.modules.clear();
             vm.sources.edit(id, change.range, &change.content);
             let module = vm.evaluate(id).unwrap();
             module.template.layout_pages(&mut vm).unwrap();
