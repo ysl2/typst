@@ -1,0 +1,63 @@
+// 301 Steps
+bench_setup
+  Instructions:              525585 (-89.80046%)
+  L1 Accesses:               707955 (-89.32723%)
+  L2 Accesses:                 1931 (-86.99225%)
+  RAM Accesses:                2668 (-72.13286%)
+  Estimated Cycles:          810990 (-88.48450%)
+
+bench_parse
+  Instructions:              265291 (-92.68842%)
+  L1 Accesses:               365932 (-92.48487%)
+  L2 Accesses:                 1192 (-90.47695%)
+  RAM Accesses:                1164 (-83.84455%)
+  Estimated Cycles:          412632 (-92.04032%)
+
+bench_eval
+  Instructions:            38442561 (-97.94540%)
+  L1 Accesses:             60152075 (-97.94830%)
+  L2 Accesses:               215176 (-97.99391%)
+  RAM Accesses:               33729 (-97.75010%)
+  Estimated Cycles:        62408470 (-97.94568%)
+
+bench_layout
+  Instructions:            11066845 (-96.66131%)
+  L1 Accesses:             15276540 (-96.48229%)
+  L2 Accesses:               120294 (-94.32934%)
+  RAM Accesses:               18306 (-64.59804%)
+  Estimated Cycles:        16518720 (-96.30198%)
+
+bench_full
+  Instructions:            50036424 (-97.73355%)
+  L1 Accesses:             76138123 (-97.74256%)
+  L2 Accesses:               337818 (-97.37170%)
+  RAM Accesses:               54661 (-96.49698%)
+  Estimated Cycles:        79740348 (-97.71626%)
+
+bench_cal
+  Instructions:              512206 (-3.535908%)
+  L1 Accesses:               627302 (-3.507587%)
+  L2 Accesses:                   17 (No change)
+  RAM Accesses:                  49 (+8.888889%)
+  Estimated Cycles:          629102 (-3.477174%)
+
+bench_edit
+  Instructions:             7551419 (-88.61631%)
+  L1 Accesses:             10051934 (-87.13074%)
+  L2 Accesses:                35573 (-94.88330%)
+  RAM Accesses:                 795 (+218.0000%)
+  Estimated Cycles:        10257624 (-87.42830%)
+
+bench_lab_eval
+  Instructions:            51140896 (-91.11198%)
+  L1 Accesses:             73422830 (-91.10935%)
+  L2 Accesses:              1027552 (-90.23487%)
+  RAM Accesses:                 434 (-74.86972%)
+  Estimated Cycles:        78575780 (-91.05586%)
+
+bench_lab
+  Instructions:           253138228 (-84.74216%)
+  L1 Accesses:            342726418 (-85.43206%)
+  L2 Accesses:              4207940 (-88.52833%)
+  RAM Accesses:               37511 (-0.769801%)
+  Estimated Cycles:       365079003 (-85.61172%)
