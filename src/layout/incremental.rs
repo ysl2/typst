@@ -263,12 +263,8 @@ impl FramesEntry {
     pub fn properties(&self) -> PatternProperties {
         let mut all_zeros = true;
         let mut multi_use = false;
-        let mut decreasing = true;
         let mut sparse = false;
         let mut abandoned = false;
-
-        let mut last = None;
-        let mut all_same = true;
 
         for (i, &temp) in self.temperature.iter().enumerate() {
             if temp == 0 && !all_zeros {
@@ -286,18 +282,6 @@ impl FramesEntry {
             if temp > 1 {
                 multi_use = true;
             }
-
-            if let Some(prev) = last {
-                if prev > temp {
-                    decreasing = false;
-                }
-
-                if temp != prev {
-                    all_same = false;
-                }
-            }
-
-            last = Some(temp);
         }
 
         if self.age > TEMP_LEN && self.age - TEMP_LEN <= self.ancient_hits {
@@ -314,7 +298,6 @@ impl FramesEntry {
             top_level: self.level == 0,
             all_zeros,
             multi_use,
-            decreasing: decreasing && !all_same,
             sparse,
             abandoned,
         }
@@ -351,8 +334,6 @@ pub struct PatternProperties {
     pub multi_use: bool,
     /// The entry was used in the last compilation.
     pub hit: bool,
-    /// The temperature is monotonously decreasing in non-terminal temperature fields.
-    pub decreasing: bool,
     /// There are zero temperatures after non-zero temperatures.
     pub sparse: bool,
     /// There are multiple zero temperatures at the front of the temperature array.
@@ -442,7 +423,6 @@ mod tests {
         assert_eq!(props.mature, false);
         assert_eq!(props.multi_use, false);
         assert_eq!(props.hit, false);
-        assert_eq!(props.decreasing, false);
         assert_eq!(props.sparse, false);
         assert_eq!(props.abandoned, true);
         assert_eq!(props.all_zeros, true);
