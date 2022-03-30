@@ -66,6 +66,7 @@ walkdir = { version = "2", optional = true }
 [dev-dependencies]
 filedescriptor = "0.8"
 iai = { git = "https://github.com/reknih/iai" }
+criterion = "0.3"
 walkdir = "2"
 
 [profile.dev]
@@ -88,4 +89,9 @@ harness = false
 [[bench]]
 name = "oneshot"
 path = "benches/oneshot.rs"
+harness = false
+
+[[bench]]
+name = "timed"
+path = "benches/timed.rs"
 harness = false

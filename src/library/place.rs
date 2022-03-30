@@ -47,9 +47,7 @@ impl Layout for PlaceNode {
 
         // Set base constraint because our pod size is base and exact
         // constraints if we needed to expand or offset.
-        *cts = Constraints::new(regions.expand);
-        cts.base = regions.base.map(Some);
-        cts.exact = regions.current.filter(regions.expand | out_of_flow);
+        *cts = Constraints::tight(&regions);
 
         Ok(frames)
     }

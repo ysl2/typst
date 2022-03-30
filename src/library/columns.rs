@@ -96,9 +96,7 @@ impl Layout for ColumnsNode {
                 cursor += width + gutter;
             }
 
-            let mut cts = Constraints::new(regions.expand);
-            cts.base = base.map(Some);
-            cts.exact = current.map(Some);
+            let cts = Constraints::tight(&Regions::one(current, base, regions.expand));
             finished.push(output.constrain(cts));
         }
 

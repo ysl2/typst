@@ -52,9 +52,7 @@ impl Layout for AlignNode {
             Arc::make_mut(frame).resize(target, aligns);
 
             // Set constraints.
-            cts.expand = regions.expand;
-            cts.base = base.filter(cts.base.map_is_some());
-            cts.exact = current.filter(regions.expand | cts.exact.map_is_some());
+            *cts = Constraints::tight(&Regions::one(current, base, regions.expand));
         }
 
         Ok(frames)

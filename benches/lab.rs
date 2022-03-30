@@ -4,6 +4,9 @@ use typst::parse::{is_newline, Scanner};
 /// The comment prefix that indicates commands.
 const PREFIX: &'static str = "//%% ";
 
+/// The _other_ comment prefix that indicates commands.
+const REV_PREFIX: &'static str = "%%// ";
+
 /// What action a [`Command`] will perform.
 #[derive(Debug, Clone, PartialEq)]
 enum CommandKind {
@@ -48,6 +51,11 @@ impl Change {
     /// Create a new change.
     pub fn new(range: Range<usize>, content: String) -> Self {
         Self { range, content }
+    }
+
+    /// Create a non-change.
+    pub fn none() -> Self {
+        Self { range: 0 .. 0, content: String::new() }
     }
 
     /// Create a new insertion at an index in the original string.
@@ -452,7 +460,7 @@ fn command(s: &mut Scanner, start: usize) -> Option<Command> {
 /// Eat a command prefix. The function will return if the command prefix has
 /// been found.
 fn command_prefix(s: &mut Scanner) -> bool {
-    if !s.rest().starts_with(PREFIX) {
+    if !s.rest().starts_with(PREFIX) && !s.rest().starts_with(REV_PREFIX) {
         return false;
     }
 

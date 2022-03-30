@@ -89,7 +89,6 @@ impl Layout for ParNode {
         regions: &Regions,
         styles: StyleChain,
     ) -> TypResult<Vec<Constrained<Arc<Frame>>>> {
-
         // Collect all text into one string used for BiDi analysis.
         let text = self.collect_text();
 
@@ -298,25 +297,10 @@ impl<'a> ParLayouter<'a> {
                     let fits =
                         stack.regions.current.zip(line.size).map(|(c, s)| c.fits(s));
 
-                    // Since the new line try did not fit, no region that would
-                    // fit the line will yield the same line break. Therefore,
-                    // the width of the region must not fit the width of the
-                    // tried line.
-                    if !fits.x {
-                        stack.cts.max.x.set_min(line.size.x);
-                    }
-
-                    // Same as above, but for height.
-                    if !fits.y {
-                        let too_large = stack.size.y + self.leading + line.size.y;
-                        stack.cts.max.y.set_min(too_large);
-                    }
-
                     // Don't start new lines at every opportunity when we are
                     // overflowing.
                     if !stack.overflowing || !fits.x {
                         stack.push(last_line);
-                        stack.cts.min.y = Some(stack.size.y);
                         start = last_end;
                         line = LineLayout::new(vm, &self, start .. end);
                     }
@@ -330,11 +314,6 @@ impl<'a> ParLayouter<'a> {
                     break;
                 }
 
-                // Again, the line must not fit. It would if the space taken up
-                // plus the line height would fit, therefore the constraint
-                // below.
-                let too_large = stack.size.y + self.leading + line.size.y;
-                stack.cts.max.y.set_min(too_large);
                 stack.finish_region(vm);
             }
 
@@ -355,19 +334,13 @@ impl<'a> ParLayouter<'a> {
                         stack.push(line);
                     }
                 }
-
-                stack.cts.min.y = Some(stack.size.y);
             } else {
-                // Otherwise, the line fits both horizontally and vertically
-                // and we remember it.
-                stack.cts.min.x.set_max(line.size.x);
                 last = Some((line, end));
             }
         }
 
         if let Some((line, _)) = last {
             stack.push(line);
-            stack.cts.min.y = Some(stack.size.y);
         }
 
         stack.finish(vm)
@@ -597,7 +570,7 @@ impl<'a> LineStack<'a> {
         Self {
             leading,
             full: regions.current,
-            cts: Constraints::new(regions.expand),
+            cts: Constraints::tight(&regions),
             regions,
             size: Size::zero(),
             lines: vec![],
@@ -625,13 +598,6 @@ impl<'a> LineStack<'a> {
     fn finish_region(&mut self, ctx: &Vm) {
         if self.regions.expand.x || self.fractional {
             self.size.x = self.regions.current.x;
-            self.cts.exact.x = Some(self.regions.current.x);
-        }
-
-        if self.overflowing {
-            self.cts.min.y = None;
-            self.cts.max.y = None;
-            self.cts.exact = self.full.map(Some);
         }
 
         let mut output = Frame::new(self.size);
@@ -644,12 +610,11 @@ impl<'a> LineStack<'a> {
             output.merge_frame(pos, frame);
         }
 
-        self.cts.base = self.regions.base.map(Some);
         self.finished.push(output.constrain(self.cts));
         self.regions.next();
         self.full = self.regions.current;
         self.size = Size::zero();
-        self.cts = Constraints::new(self.regions.expand);
+        self.cts = Constraints::tight(&self.regions);
     }
 
     /// Finish the last region and return the built frames.
