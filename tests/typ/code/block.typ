@@ -52,7 +52,7 @@
 // Some things can't be joined.
 {
   [A]
-  // Error: 3-4 cannot join content with integer
+  // Error: 3-4 cannot join integer with content
   1
   [B]
 }

@@ -39,7 +39,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::diag::{At, StrResult, Trace, Tracepoint, TypResult};
 use crate::geom::{Angle, Em, Fraction, Length, Ratio};
 use crate::library;
-use crate::model::{Content, Pattern, Recipe, StyleEntry, StyleMap};
+use crate::model::{Content, Pattern, Recipe, StyleEntry, Transform};
 use crate::source::{SourceId, SourceStore};
 use crate::syntax::ast::*;
 use crate::syntax::{Span, Spanned};
@@ -148,29 +148,24 @@ fn eval_markup(
 
     while let Some(node) = nodes.next() {
         seq.push(match node {
-            MarkupNode::Expr(Expr::Set(set)) => {
-                let styles = set.eval(vm)?;
-                if vm.flow.is_some() {
-                    break;
-                }
-
-                eval_markup(vm, nodes)?.styled_with_map(styles)
-            }
-            MarkupNode::Expr(Expr::Show(show)) => {
-                let recipe = show.eval(vm)?;
-                if vm.flow.is_some() {
-                    break;
-                }
-
-                eval_markup(vm, nodes)?
-                    .styled_with_entry(StyleEntry::Recipe(recipe).into())
-            }
             MarkupNode::Expr(Expr::Wrap(wrap)) => {
                 let tail = eval_markup(vm, nodes)?;
                 vm.scopes.top.define(wrap.binding().take(), tail);
                 wrap.body().eval(vm)?.display()
             }
+            MarkupNode::Expr(expr) => {
+                let value = expr.eval(vm)?;
+                if vm.flow.is_some() {
+                    break;
+                }
 
+                match value {
+                    Value::Transform(transform) => {
+                        eval_markup(vm, nodes)?.transform(transform)
+                    }
+                    v => v.display(),
+                }
+            }
             _ => node.eval(vm)?,
         });
 
@@ -315,8 +310,8 @@ impl Eval for Expr {
             Self::Unary(v) => v.eval(vm),
             Self::Binary(v) => v.eval(vm),
             Self::Let(v) => v.eval(vm),
-            Self::Set(_) => Err(forbidden("set")),
-            Self::Show(_) => Err(forbidden("show")),
+            Self::Set(v) => v.eval(vm).map(Value::Transform),
+            Self::Show(v) => v.eval(vm).map(Value::Transform),
             Self::Wrap(_) => Err(forbidden("wrap")),
             Self::If(v) => v.eval(vm),
             Self::While(v) => v.eval(vm),
@@ -377,30 +372,11 @@ fn eval_code(
     exprs: &mut impl Iterator<Item = Expr>,
 ) -> TypResult<Value> {
     let flow = vm.flow.take();
-    let mut output = Value::None;
+    let mut values = vec![];
 
     while let Some(expr) = exprs.next() {
         let span = expr.span();
         let value = match expr {
-            Expr::Set(set) => {
-                let styles = set.eval(vm)?;
-                if vm.flow.is_some() {
-                    break;
-                }
-
-                let tail = eval_code(vm, exprs)?.display();
-                Value::Content(tail.styled_with_map(styles))
-            }
-            Expr::Show(show) => {
-                let recipe = show.eval(vm)?;
-                let entry = StyleEntry::Recipe(recipe).into();
-                if vm.flow.is_some() {
-                    break;
-                }
-
-                let tail = eval_code(vm, exprs)?.display();
-                Value::Content(tail.styled_with_entry(entry))
-            }
             Expr::Wrap(wrap) => {
                 let tail = eval_code(vm, exprs)?;
                 vm.scopes.top.define(wrap.binding().take(), tail);
@@ -410,7 +386,7 @@ fn eval_code(
             _ => expr.eval(vm)?,
         };
 
-        output = ops::join(output, value).at(span)?;
+        values.push((value, span));
 
         if vm.flow.is_some() {
             break;
@@ -420,6 +396,10 @@ fn eval_code(
     if flow.is_some() {
         vm.flow = flow;
     }
+
+    let output = values
+        .into_iter()
+        .try_rfold(Value::None, |acc, (v, span)| ops::join(v, acc).at(span))?;
 
     Ok(output)
 }
@@ -753,18 +733,18 @@ impl Eval for LetExpr {
 }
 
 impl Eval for SetExpr {
-    type Output = StyleMap;
+    type Output = Transform;
 
     fn eval(&self, vm: &mut Machine) -> TypResult<Self::Output> {
         let target = self.target();
         let target = target.eval(vm)?.cast::<Func>().at(target.span())?;
         let args = self.args().eval(vm)?;
-        Ok(target.set(args)?)
+        Ok(Transform(target.set(args)?))
     }
 }
 
 impl Eval for ShowExpr {
-    type Output = Recipe;
+    type Output = Transform;
 
     fn eval(&self, vm: &mut Machine) -> TypResult<Self::Output> {
         // Evaluate the target function.
@@ -796,7 +776,9 @@ impl Eval for ShowExpr {
             body,
         });
 
-        Ok(Recipe { pattern, func: Spanned::new(func, span) })
+        Ok(Transform(
+            StyleEntry::Recipe(Recipe { pattern, func: Spanned::new(func, span) }).into(),
+        ))
     }
 }
 

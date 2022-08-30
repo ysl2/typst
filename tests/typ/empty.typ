@@ -1,0 +1,4 @@
+{
+  [Hello]
+  set text(blue)
+}

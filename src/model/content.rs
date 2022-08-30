@@ -8,7 +8,7 @@ use typed_arena::Arena;
 
 use super::{
     Barrier, CollapsingBuilder, Interruption, Key, Layout, LayoutNode, LocateNode,
-    Property, Show, ShowNode, StyleEntry, StyleMap, StyleVecBuilder, Target,
+    Property, Show, ShowNode, StyleEntry, StyleMap, StyleVecBuilder, Target, Transform,
 };
 use crate::diag::StrResult;
 use crate::library::layout::{FlowChild, FlowNode, PageNode, PlaceNode, Spacing};
@@ -202,6 +202,11 @@ impl Content {
         }
 
         Self::Styled(Arc::new((self, styles)))
+    }
+
+    /// Transform this content.
+    pub fn transform(self, transform: Transform) -> Self {
+        self.styled_with_map(transform.0)
     }
 
     /// Assign a semantic role to this content.

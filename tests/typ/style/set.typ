@@ -49,5 +49,5 @@ Hello *{x}*
 . Tiger
 
 ---
-// Error: 11-25 set is only allowed directly in code and content blocks
-{ let x = set text(blue) }
+{ set text(blue) + set text(tracking: 1pt) }
+Blue!

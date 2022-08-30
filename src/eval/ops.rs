@@ -24,6 +24,9 @@ pub fn join(lhs: Value, rhs: Value) -> StrResult<Value> {
         (Str(a), Content(b)) => Content(model::Content::Text(a.into()) + b),
         (Content(a), Str(b)) => Content(a + model::Content::Text(b.into())),
         (Content(a), Content(b)) => Content(a + b),
+        (Transform(a), Str(b)) => Content(model::Content::Text(b.into()).transform(a)),
+        (Transform(a), Content(b)) => Content(b.transform(a)),
+        (Transform(a), Transform(b)) => Transform(a + b),
         (Array(a), Array(b)) => Array(a + b),
         (Dict(a), Dict(b)) => Dict(a + b),
         (a, b) => mismatch!("cannot join {} with {}", a, b),
@@ -89,6 +92,10 @@ pub fn add(lhs: Value, rhs: Value) -> StrResult<Value> {
         (Content(a), Content(b)) => Content(a + b),
         (Content(a), Str(b)) => Content(a + model::Content::Text(b.into())),
         (Str(a), Content(b)) => Content(model::Content::Text(a.into()) + b),
+
+        (Transform(a), Str(b)) => Content(model::Content::Text(b.into()).transform(a)),
+        (Transform(a), Content(b)) => Content(b.transform(a)),
+        (Transform(a), Transform(b)) => Transform(a + b),
 
         (Array(a), Array(b)) => Array(a + b),
         (Dict(a), Dict(b)) => Dict(a + b),

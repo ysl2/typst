@@ -128,7 +128,7 @@
 ---
 // Ref: true
 // Test break in set rule.
-// Should output `Hi` in blue.
+// Should output `Hello` in black.
 #for i in range(10) {
   [Hello]
   set text(blue, ..break)
@@ -138,7 +138,6 @@
 ---
 // Test second block during break flow.
 // Ref: true
-
 #for i in range(10) {
   table(
     { [A]; break },

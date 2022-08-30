@@ -8,7 +8,7 @@ use super::{ops, Args, Array, Cast, Dict, Func, RawLength, Str};
 use crate::diag::StrResult;
 use crate::geom::{Angle, Color, Em, Fraction, Length, Ratio, Relative, RgbaColor};
 use crate::library::text::RawNode;
-use crate::model::{Content, Layout};
+use crate::model::{Content, Layout, Transform};
 use crate::util::EcoString;
 
 /// A computational value.
@@ -40,6 +40,8 @@ pub enum Value {
     Str(Str),
     /// A content value: `[*Hi* there]`.
     Content(Content),
+    /// A transform value: `set text(fill: blue)`.
+    Transform(Transform),
     /// An array of values: `(1, "hi", 12cm)`.
     Array(Array),
     /// A dictionary value: `(color: #f79143, pattern: dashed)`.
@@ -93,6 +95,7 @@ impl Value {
             Self::Color(_) => Color::TYPE_NAME,
             Self::Str(_) => Str::TYPE_NAME,
             Self::Content(_) => Content::TYPE_NAME,
+            Self::Transform(_) => Transform::TYPE_NAME,
             Self::Array(_) => Array::TYPE_NAME,
             Self::Dict(_) => Dict::TYPE_NAME,
             Self::Func(_) => Func::TYPE_NAME,
@@ -150,6 +153,7 @@ impl Debug for Value {
             Self::Color(v) => Debug::fmt(v, f),
             Self::Str(v) => Debug::fmt(v, f),
             Self::Content(_) => f.pad("[...]"),
+            Self::Transform(_) => f.pad("<transform>"),
             Self::Array(v) => Debug::fmt(v, f),
             Self::Dict(v) => Debug::fmt(v, f),
             Self::Func(v) => Debug::fmt(v, f),
@@ -188,6 +192,7 @@ impl Hash for Value {
             Self::Color(v) => v.hash(state),
             Self::Str(v) => v.hash(state),
             Self::Content(v) => v.hash(state),
+            Self::Transform(v) => v.hash(state),
             Self::Array(v) => v.hash(state),
             Self::Dict(v) => v.hash(state),
             Self::Func(v) => v.hash(state),
@@ -400,6 +405,7 @@ primitive! { Content: "content",
     None => Content::new(),
     Str(text) => Content::Text(text.into())
 }
+primitive! { Transform: "transform", Transform }
 primitive! { Array: "array", Array }
 primitive! { Dict: "dictionary", Dict }
 primitive! { Func: "function", Func }
