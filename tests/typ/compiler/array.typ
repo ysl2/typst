@@ -60,6 +60,9 @@
 
 ---
 // Test default value.
+#let array = (1, 2, 3)
+#test(array.at(2, default: 5), 3)
+#test(array.at(3, default: 5), 5)
 #test((1, 2, 3).at(2, default: 5), 3)
 #test((1, 2, 3).at(3, default: 5), 5)
 

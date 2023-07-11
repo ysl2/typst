@@ -126,7 +126,6 @@ impl Func {
         args: impl IntoIterator<Item = T>,
     ) -> SourceResult<Value> {
         let route = Route::default();
-        let scopes = Scopes::new(None);
         let mut locator = Locator::chained(vt.locator.track());
         let vt = Vt {
             world: vt.world,
@@ -135,7 +134,7 @@ impl Func {
             delayed: TrackedMut::reborrow_mut(&mut vt.delayed),
             tracer: TrackedMut::reborrow_mut(&mut vt.tracer),
         };
-        let mut vm = Vm::new(vt, route.track(), FileId::detached(), scopes);
+        let mut vm = Vm::new(vt, route.track(), FileId::detached());
         let args = Args::new(self.span(), args);
         self.call_vm(&mut vm, args)
     }
@@ -356,12 +355,12 @@ impl Closure {
         };
 
         // Prepare VM.
-        let mut vm = Vm::new(vt, route, closure.location, scopes);
+        let mut vm = Vm::new(vt, route, closure.location);
         vm.depth = depth;
 
         // Provide the closure itself for recursive calls.
         if let Some(name) = &closure.name {
-            vm.define(name.clone(), Value::Func(this.clone()));
+            vm.define(&mut scopes, name.clone(), Value::Func(this.clone()));
         }
 
         // Parse the arguments according to the parameter list.
@@ -375,13 +374,16 @@ impl Closure {
         for p in &closure.params {
             match p {
                 Param::Pos(pattern) => match pattern {
-                    ast::Pattern::Normal(ast::Expr::Ident(ident)) => {
-                        vm.define(ident.clone(), args.expect::<Value>(ident)?)
-                    }
+                    ast::Pattern::Normal(ast::Expr::Ident(ident)) => vm.define(
+                        &mut scopes,
+                        ident.clone(),
+                        args.expect::<Value>(ident)?,
+                    ),
                     ast::Pattern::Normal(_) => unreachable!(),
                     _ => {
                         pattern.define(
                             &mut vm,
+                            &mut scopes,
                             args.expect::<Value>("pattern parameter")?,
                         )?;
                     }
@@ -395,7 +397,7 @@ impl Closure {
                 Param::Named(ident, default) => {
                     let value =
                         args.named::<Value>(ident)?.unwrap_or_else(|| default.clone());
-                    vm.define(ident.clone(), value);
+                    vm.define(&mut scopes, ident.clone(), value);
                 }
             }
         }
@@ -405,14 +407,14 @@ impl Closure {
             if let Some(sink_pos_values) = sink_pos_values {
                 remaining_args.items.extend(sink_pos_values);
             }
-            vm.define(sink, remaining_args);
+            vm.define(&mut scopes, sink, remaining_args);
         }
 
         // Ensure all arguments have been used.
         args.finish()?;
 
         // Handle control flow.
-        let result = closure.body.eval(&mut vm);
+        let result = closure.body.eval(&mut vm, &mut scopes);
         match vm.flow {
             Some(FlowEvent::Return(_, Some(explicit))) => return Ok(explicit),
             Some(FlowEvent::Return(_, None)) => {}

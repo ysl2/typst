@@ -248,7 +248,7 @@
 #test(b, 1)
 
 ---
-// Error: 3-6 cannot mutate a constant: box
+// Error: 3-6 cannot mutate a constant
 #(box = 1)
 
 ---

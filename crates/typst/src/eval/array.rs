@@ -4,9 +4,11 @@ use std::ops::{Add, AddAssign};
 
 use ecow::{eco_format, EcoString, EcoVec};
 
-use super::{ops, Args, CastInfo, FromValue, Func, IntoValue, Reflect, Value, Vm};
+use super::{
+    ops, Args, CastInfo, FromValue, Func, IntoValue, MaybeMut, Reflect, Value, Vm,
+};
 use crate::diag::{At, SourceResult, StrResult};
-use crate::syntax::Span;
+use crate::syntax::{Span, Spanned};
 use crate::util::pretty_array_like;
 
 /// Create a new [`Array`] from values.
@@ -59,8 +61,12 @@ impl Array {
     }
 
     /// Mutably borrow the first value in the array.
-    pub fn first_mut(&mut self) -> StrResult<&mut Value> {
-        self.0.make_mut().first_mut().ok_or_else(array_is_empty)
+    pub fn first_mut(&mut self) -> StrResult<MaybeMut<'_>> {
+        self.0
+            .make_mut()
+            .first_mut()
+            .map(MaybeMut::Mut)
+            .ok_or_else(array_is_empty)
     }
 
     /// The last value in the array.
@@ -69,8 +75,12 @@ impl Array {
     }
 
     /// Mutably borrow the last value in the array.
-    pub fn last_mut(&mut self) -> StrResult<&mut Value> {
-        self.0.make_mut().last_mut().ok_or_else(array_is_empty)
+    pub fn last_mut(&mut self) -> StrResult<MaybeMut<'_>> {
+        self.0
+            .make_mut()
+            .last_mut()
+            .map(MaybeMut::Mut)
+            .ok_or_else(array_is_empty)
     }
 
     /// Borrow the value at the given index.
@@ -86,10 +96,16 @@ impl Array {
     }
 
     /// Mutably borrow the value at the given index.
-    pub fn at_mut(&mut self, index: i64) -> StrResult<&mut Value> {
+    pub fn at_mut(
+        &mut self,
+        index: i64,
+        default: Option<Spanned<Value>>,
+    ) -> StrResult<MaybeMut<'_>> {
         let len = self.len();
         self.locate(index)
             .and_then(move |i| self.0.make_mut().get_mut(i))
+            .map(MaybeMut::Mut)
+            .or_else(|| default.map(|v| MaybeMut::temp(v.v, v.span)))
             .ok_or_else(|| out_of_bounds_no_default(index, len))
     }
 

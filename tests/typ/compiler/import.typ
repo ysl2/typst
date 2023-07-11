@@ -56,15 +56,12 @@
 #test(module.push(2), 3)
 
 ---
-// Edge case for module access that isn't fixed.
+// Edge case for module access. Tests that definitions with the name of mutating
+// methods work. They didn't earlier because the need for mutability was
+// detected through the field name.
 #import "module.typ"
-
-// Works because the method name isn't categorized as mutating.
 #test((module,).at(0).item(1, 2), 3)
-
-// Doesn't work because of mutating name.
-// Error: 2-11 cannot mutate a temporary value
-#(module,).at(0).push()
+#test((module,).at(0).push(2), 3)
 
 ---
 // Who needs whitespace anyways?

@@ -261,18 +261,16 @@ impl State {
         self,
         vm: &mut Vm,
         method: &str,
-        mut args: Args,
+        args: &mut Args,
         span: Span,
     ) -> SourceResult<Value> {
-        let value = match method {
+        Ok(match method {
             "display" => self.display(args.eat()?).into_value(),
             "at" => self.at(&mut vm.vt, args.expect("location")?)?,
             "final" => self.final_(&mut vm.vt, args.expect("location")?)?,
             "update" => self.update(args.expect("value or function")?).into_value(),
             _ => bail!(span, "type state has no method `{}`", method),
-        };
-        args.finish()?;
-        Ok(value)
+        })
     }
 
     /// Display the current value of the state.

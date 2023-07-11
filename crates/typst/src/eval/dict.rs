@@ -5,9 +5,9 @@ use std::sync::Arc;
 
 use ecow::{eco_format, EcoString};
 
-use super::{array, Array, Str, Value};
+use super::{array, Array, MaybeMut, Str, Value};
 use crate::diag::StrResult;
-use crate::syntax::is_ident;
+use crate::syntax::{is_ident, Spanned};
 use crate::util::{pretty_array_like, separated_list, ArcExt};
 
 /// Create a new [`Dict`] from key-value pairs.
@@ -58,9 +58,15 @@ impl Dict {
     }
 
     /// Mutably borrow the value the given `key` maps to.
-    pub fn at_mut(&mut self, key: &str) -> StrResult<&mut Value> {
+    pub fn at_mut(
+        &mut self,
+        key: &str,
+        default: Option<Spanned<Value>>,
+    ) -> StrResult<MaybeMut<'_>> {
         Arc::make_mut(&mut self.0)
             .get_mut(key)
+            .map(MaybeMut::Mut)
+            .or_else(|| default.map(|v| MaybeMut::temp(v.v, v.span)))
             .ok_or_else(|| missing_key_no_default(key))
     }
 

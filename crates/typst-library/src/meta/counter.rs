@@ -313,10 +313,10 @@ impl Counter {
         self,
         vm: &mut Vm,
         method: &str,
-        mut args: Args,
+        args: &mut Args,
         span: Span,
     ) -> SourceResult<Value> {
-        let value = match method {
+        Ok(match method {
             "display" => self
                 .display(args.eat()?, args.named("both")?.unwrap_or(false))
                 .into_value(),
@@ -329,9 +329,7 @@ impl Counter {
             "at" => self.at(&mut vm.vt, args.expect("location")?)?.into_value(),
             "final" => self.final_(&mut vm.vt, args.expect("location")?)?.into_value(),
             _ => bail!(span, "type counter has no method `{}`", method),
-        };
-        args.finish()?;
-        Ok(value)
+        })
     }
 
     /// Display the current value of the counter.

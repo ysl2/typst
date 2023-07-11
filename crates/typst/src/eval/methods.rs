@@ -2,25 +2,34 @@
 
 use ecow::{eco_format, EcoString};
 
-use super::{Args, IntoValue, Str, Value, Vm};
-use crate::diag::{At, Hint, SourceResult};
-use crate::eval::{bail, Datetime};
+use super::{Args, IntoValue, MaybeMut, Str, Value, Vm};
+use crate::diag::{bail, At, Hint, SourceResult};
+use crate::eval::Datetime;
 use crate::geom::{Align, Axes, Color, Dir, Em, GenAlign};
 use crate::model::{Location, Selector};
 use crate::syntax::Span;
 
 /// Call a method on a value.
-pub fn call(
+pub fn call<'a>(
     vm: &mut Vm,
-    value: Value,
+    value: MaybeMut<'a>,
     method: &str,
-    mut args: Args,
+    args: &mut Args,
     span: Span,
-) -> SourceResult<Value> {
+) -> SourceResult<MaybeMut<'a>> {
     let name = value.type_name();
     let missing = || Err(missing_method(name, method)).at(span);
 
-    let output = match value {
+    macro_rules! mutate {
+        ($variant:ident) => {
+            match value.mutate()? {
+                Value::$variant(v) => v,
+                _ => unreachable!(),
+            }
+        };
+    }
+
+    let temp = match &*value {
         Value::Color(color) => match method {
             "lighten" => color.lighten(args.expect("amount")?).into_value(),
             "darken" => color.darken(args.expect("amount")?).into_value(),
@@ -110,12 +119,41 @@ pub fn call(
 
         Value::Array(array) => match method {
             "len" => array.len().into_value(),
-            "first" => array.first().at(span)?.clone(),
-            "last" => array.last().at(span)?.clone(),
-            "at" => array
-                .at(args.expect("index")?, args.named("default")?.as_ref())
-                .at(span)?
-                .clone(),
+            "first" => {
+                if let MaybeMut::Mut(Value::Array(array)) = value {
+                    return array.first_mut().at(span);
+                }
+                array.first().at(span)?.clone()
+            }
+            "last" => {
+                if let MaybeMut::Mut(Value::Array(array)) = value {
+                    return array.last_mut().at(span);
+                }
+                array.last().at(span)?.clone()
+            }
+            "at" => {
+                if let MaybeMut::Mut(Value::Array(array)) = value {
+                    return array
+                        .at_mut(args.expect("index")?, args.named("default")?)
+                        .at(span);
+                }
+                array
+                    .at(args.expect("index")?, args.named("default")?.as_ref())
+                    .at(span)?
+                    .clone()
+            }
+            "push" => {
+                mutate!(Array).push(args.expect("value")?);
+                Value::None
+            }
+            "pop" => mutate!(Array).pop().at(span)?,
+            "insert" => {
+                mutate!(Array)
+                    .insert(args.expect("index")?, args.expect("value")?)
+                    .at(span)?;
+                Value::None
+            }
+            "remove" => mutate!(Array).remove(args.expect("index")?).at(span)?,
             "slice" => {
                 let start = args.expect("start")?;
                 let mut end = args.eat()?;
@@ -152,10 +190,23 @@ pub fn call(
 
         Value::Dict(dict) => match method {
             "len" => dict.len().into_value(),
-            "at" => dict
-                .at(&args.expect::<Str>("key")?, args.named("default")?.as_ref())
-                .at(span)?
-                .clone(),
+            "at" => {
+                if let MaybeMut::Mut(Value::Dict(dict)) = value {
+                    return dict
+                        .at_mut(&args.expect::<Str>("key")?, args.named("default")?)
+                        .at(span);
+                }
+                dict.at(&args.expect::<Str>("key")?, args.named("default")?.as_ref())
+                    .at(span)?
+                    .clone()
+            }
+            "insert" => {
+                mutate!(Dict).insert(args.expect::<Str>("key")?, args.expect("value")?);
+                Value::None
+            }
+            "remove" => {
+                mutate!(Dict).remove(&args.expect::<EcoString>("key")?).at(span)?
+            }
             "keys" => dict.keys().into_value(),
             "values" => dict.values().into_value(),
             "pairs" => dict.pairs().into_value(),
@@ -163,7 +214,7 @@ pub fn call(
         },
 
         Value::Func(func) => match method {
-            "with" => func.with(args.take()).into_value(),
+            "with" => func.clone().with(args.take()).into_value(),
             "where" => {
                 let fields = args.to_named();
                 args.items.retain(|arg| arg.name.is_none());
@@ -268,96 +319,15 @@ pub fn call(
                     _ => return missing(),
                 }
             } else {
-                return (vm.items.library_method)(vm, &dynamic, method, args, span);
+                return (vm.items.library_method)(vm, dynamic, method, args, span)
+                    .map(|v| MaybeMut::temp(v, span));
             }
         }
 
         _ => return missing(),
     };
 
-    args.finish()?;
-    Ok(output)
-}
-
-/// Call a mutating method on a value.
-pub fn call_mut(
-    value: &mut Value,
-    method: &str,
-    mut args: Args,
-    span: Span,
-) -> SourceResult<Value> {
-    let name = value.type_name();
-    let missing = || Err(missing_method(name, method)).at(span);
-    let mut output = Value::None;
-
-    match value {
-        Value::Array(array) => match method {
-            "push" => array.push(args.expect("value")?),
-            "pop" => output = array.pop().at(span)?,
-            "insert" => {
-                array.insert(args.expect("index")?, args.expect("value")?).at(span)?
-            }
-            "remove" => output = array.remove(args.expect("index")?).at(span)?,
-            _ => return missing(),
-        },
-
-        Value::Dict(dict) => match method {
-            "insert" => dict.insert(args.expect::<Str>("key")?, args.expect("value")?),
-            "remove" => {
-                output = dict.remove(&args.expect::<EcoString>("key")?).at(span)?
-            }
-            _ => return missing(),
-        },
-
-        _ => return missing(),
-    }
-
-    args.finish()?;
-    Ok(output)
-}
-
-/// Call an accessor method on a value.
-pub fn call_access<'a>(
-    value: &'a mut Value,
-    method: &str,
-    mut args: Args,
-    span: Span,
-) -> SourceResult<&'a mut Value> {
-    let name = value.type_name();
-    let missing = || Err(missing_method(name, method)).at(span);
-
-    let slot = match value {
-        Value::Array(array) => match method {
-            "first" => array.first_mut().at(span)?,
-            "last" => array.last_mut().at(span)?,
-            "at" => array.at_mut(args.expect("index")?).at(span)?,
-            _ => return missing(),
-        },
-        Value::Dict(dict) => match method {
-            "at" => dict.at_mut(&args.expect::<Str>("key")?).at(span)?,
-            _ => return missing(),
-        },
-        _ => return missing(),
-    };
-
-    args.finish()?;
-    Ok(slot)
-}
-
-/// Whether a specific method is mutating.
-pub fn is_mutating(method: &str) -> bool {
-    matches!(method, "push" | "pop" | "insert" | "remove")
-}
-
-/// Whether a specific method is an accessor.
-pub fn is_accessor(method: &str) -> bool {
-    matches!(method, "first" | "last" | "at")
-}
-
-/// The missing method error message.
-#[cold]
-fn missing_method(type_name: &str, method: &str) -> String {
-    format!("type {type_name} has no method `{method}`")
+    Ok(MaybeMut::temp(temp, span))
 }
 
 /// List the available methods for a type and whether they take arguments.
@@ -455,4 +425,10 @@ pub fn methods_on(type_name: &str) -> &[(&'static str, bool)] {
         "state" => &[("display", true), ("at", true), ("final", true), ("update", true)],
         _ => &[],
     }
+}
+
+/// The missing method error message.
+#[cold]
+fn missing_method(type_name: &str, method: &str) -> String {
+    format!("type {type_name} has no method `{method}`")
 }

@@ -115,7 +115,7 @@ pub struct LangItems {
         vm: &mut Vm,
         dynamic: &Dynamic,
         method: &str,
-        args: Args,
+        args: &mut Args,
         span: Span,
     ) -> SourceResult<Value>,
 }

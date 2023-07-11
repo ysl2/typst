@@ -4,8 +4,9 @@ use std::hash::Hash;
 
 use ecow::{eco_format, EcoString};
 
-use super::{IntoValue, Library, Value};
-use crate::diag::{bail, StrResult};
+use super::{Immutability, IntoValue, Library, MaybeMut, Value};
+use crate::diag::{At, SourceResult, StrResult};
+use crate::syntax::Span;
 
 /// A stack of scopes.
 #[derive(Debug, Default, Clone)]
@@ -45,6 +46,20 @@ impl<'a> Scopes<'a> {
             .ok_or_else(|| unknown_variable(var))
     }
 
+    /// Try to access a variable, mutably if possible.
+    pub fn get_maybe_mut(&mut self, var: &str, span: Span) -> SourceResult<MaybeMut<'_>> {
+        std::iter::once(&mut self.top)
+            .chain(&mut self.scopes.iter_mut().rev())
+            .find_map(|scope| scope.get_maybe_mut(var, span))
+            .or_else(|| {
+                self.base
+                    .and_then(|base| base.global.scope().get(var))
+                    .map(|value| MaybeMut::Im(value.clone(), span, Immutability::Const))
+            })
+            .ok_or_else(|| unknown_variable(var))
+            .at(span)
+    }
+
     /// Try to access a variable immutably in math.
     pub fn get_in_math(&self, var: &str) -> StrResult<&Value> {
         std::iter::once(&self.top)
@@ -52,19 +67,6 @@ impl<'a> Scopes<'a> {
             .chain(self.base.map(|base| base.math.scope()))
             .find_map(|scope| scope.get(var))
             .ok_or_else(|| eco_format!("unknown variable: {}", var))
-    }
-
-    /// Try to access a variable mutably.
-    pub fn get_mut(&mut self, var: &str) -> StrResult<&mut Value> {
-        std::iter::once(&mut self.top)
-            .chain(&mut self.scopes.iter_mut().rev())
-            .find_map(|scope| scope.get_mut(var))
-            .ok_or_else(|| {
-                match self.base.and_then(|base| base.global.scope().get(var)) {
-                    Some(_) => eco_format!("cannot mutate a constant: {}", var),
-                    _ => unknown_variable(var),
-                }
-            })?
     }
 }
 
@@ -114,17 +116,17 @@ impl Scope {
 
     /// Try to access a variable immutably.
     pub fn get(&self, var: &str) -> Option<&Value> {
-        self.0.get(var).map(Slot::read)
+        self.0.get(var).map(Slot::get)
     }
 
-    /// Try to access a variable mutably.
-    pub fn get_mut(&mut self, var: &str) -> Option<StrResult<&mut Value>> {
-        self.0.get_mut(var).map(Slot::write)
+    /// Try to access a variable, mutably if possible.
+    pub fn get_maybe_mut(&mut self, var: &str, span: Span) -> Option<MaybeMut<'_>> {
+        self.0.get_mut(var).map(|slot| slot.get_maybe_mut(span))
     }
 
     /// Iterate over all definitions.
     pub fn iter(&self) -> impl Iterator<Item = (&EcoString, &Value)> {
-        self.0.iter().map(|(k, v)| (k, v.read()))
+        self.0.iter().map(|(k, v)| (k, v.get()))
     }
 }
 
@@ -132,7 +134,7 @@ impl Debug for Scope {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.write_str("Scope ")?;
         f.debug_map()
-            .entries(self.0.iter().map(|(k, v)| (k, v.read())))
+            .entries(self.0.iter().map(|(k, v)| (k, v.get())))
             .finish()
     }
 }
@@ -161,17 +163,17 @@ impl Slot {
         Self { value, kind }
     }
 
-    /// Read the value.
-    fn read(&self) -> &Value {
+    /// Access the slot immutably.
+    fn get(&self) -> &Value {
         &self.value
     }
 
-    /// Try to write to the value.
-    fn write(&mut self) -> StrResult<&mut Value> {
+    /// Access the slot, mutably if possible.
+    fn get_maybe_mut(&mut self, span: Span) -> MaybeMut<'_> {
         match self.kind {
-            Kind::Normal => Ok(&mut self.value),
+            Kind::Normal => MaybeMut::Mut(&mut self.value),
             Kind::Captured => {
-                bail!("variables from outside the function are read-only and cannot be modified")
+                MaybeMut::Im(self.value.clone(), span, Immutability::Captured)
             }
         }
     }

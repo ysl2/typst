@@ -37,6 +37,9 @@
 
 ---
 // Test default value.
+#let dict = (a: 1, b: 2)
+#test(dict.at("b", default: 3), 2)
+#test(dict.at("c", default: 3), 3)
 #test((a: 1, b: 2).at("b", default: 3), 2)
 #test((a: 1, b: 2).at("c", default: 3), 3)
 
