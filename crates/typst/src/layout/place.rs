@@ -1,8 +1,7 @@
 use crate::diag::{bail, At, Hint, SourceResult};
 use crate::engine::Engine;
-use crate::foundations::{
-    elem, Behave, Behaviour, Content, NativeElement, Smart, StyleChain,
-};
+use crate::foundations::{elem, Behave, Behaviour, Content, NativeElement, Smart};
+use crate::introspection::Context;
 use crate::layout::{Align, Axes, Em, Fragment, Layout, Length, Regions, Rel, VAlign};
 
 /// Places content at an absolute position.
@@ -91,14 +90,14 @@ impl Layout for PlaceElem {
     fn layout(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment> {
         // The pod is the base area of the region because for absolute
         // placement we don't really care about the already used area.
         let base = regions.base();
-        let float = self.float(styles);
-        let alignment = self.alignment(styles);
+        let float = self.float(context.styles);
+        let alignment = self.alignment(context.styles);
 
         if float
             && alignment
@@ -117,7 +116,7 @@ impl Layout for PlaceElem {
             .aligned(alignment.unwrap_or_else(|| Align::CENTER));
 
         let pod = Regions::one(base, Axes::splat(false));
-        let frame = child.layout(engine, styles, pod)?.into_frame();
+        let frame = child.layout(engine, context, pod)?.into_frame();
         Ok(Fragment::frame(frame))
     }
 }

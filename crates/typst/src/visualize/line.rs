@@ -1,6 +1,7 @@
 use crate::diag::{bail, SourceResult};
 use crate::engine::Engine;
-use crate::foundations::{elem, NativeElement, StyleChain};
+use crate::foundations::{elem, NativeElement};
+use crate::introspection::Context;
 use crate::layout::{
     Abs, Angle, Axes, Fragment, Frame, FrameItem, Layout, Length, Regions, Rel, Size,
 };
@@ -63,9 +64,10 @@ impl Layout for LineElem {
     fn layout(
         &self,
         _: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment> {
+        let styles = context.styles;
         let resolve =
             |axes: Axes<Rel<Abs>>| axes.zip_map(regions.base(), Rel::relative_to);
         let start = resolve(self.start(styles));

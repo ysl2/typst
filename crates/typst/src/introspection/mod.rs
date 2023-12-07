@@ -1,5 +1,6 @@
 //! Interaction between document parts.
 
+mod context;
 mod counter;
 mod introspector;
 #[path = "locate.rs"]
@@ -11,6 +12,7 @@ mod metadata;
 mod query_;
 mod state;
 
+pub use self::context::*;
 pub use self::counter::*;
 pub use self::introspector::*;
 pub use self::locate_::*;

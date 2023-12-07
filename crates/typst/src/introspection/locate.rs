@@ -1,3 +1,5 @@
+use std::hash::Hash;
+
 use crate::diag::SourceResult;
 use crate::engine::Engine;
 use crate::foundations::{elem, func, Content, Func, NativeElement, Show, StyleChain};

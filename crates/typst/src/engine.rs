@@ -4,7 +4,7 @@ use comemo::{Track, Tracked, TrackedMut, Validate};
 
 use crate::diag::SourceResult;
 use crate::eval::Tracer;
-use crate::introspection::{Introspector, Locator};
+use crate::introspection::Introspector;
 use crate::syntax::FileId;
 use crate::World;
 
@@ -17,8 +17,6 @@ pub struct Engine<'a> {
     /// The route the engine took during compilation. This is used to detect
     /// cyclic imports and too much nesting.
     pub route: Route<'a>,
-    /// Provides stable identities to elements.
-    pub locator: &'a mut Locator<'a>,
     /// The tracer for inspection of the values an expression produces.
     pub tracer: TrackedMut<'a, Tracer>,
 }

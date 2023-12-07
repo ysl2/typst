@@ -2,9 +2,8 @@ use std::str::FromStr;
 
 use crate::diag::{bail, SourceResult};
 use crate::engine::Engine;
-use crate::foundations::{
-    cast, elem, scope, Array, Content, Fold, NativeElement, Smart, StyleChain,
-};
+use crate::foundations::{cast, elem, scope, Array, Content, Fold, NativeElement, Smart};
+use crate::introspection::Context;
 use crate::layout::{
     Align, Axes, BlockElem, Em, Fragment, GridLayouter, HAlign, Layout, Length, Regions,
     Sizing, Spacing, VAlign,
@@ -213,9 +212,10 @@ impl Layout for EnumElem {
     fn layout(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment> {
+        let styles = context.styles;
         let numbering = self.numbering(styles);
         let indent = self.indent(styles);
         let body_indent = self.body_indent(styles);
@@ -276,7 +276,7 @@ impl Layout for EnumElem {
             Axes::with_y(&[gutter.into()]),
             &cells,
             regions,
-            styles,
+            context,
             self.span(),
         );
 

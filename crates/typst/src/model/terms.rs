@@ -1,8 +1,7 @@
 use crate::diag::{bail, SourceResult};
 use crate::engine::Engine;
-use crate::foundations::{
-    cast, elem, scope, Array, Content, NativeElement, Smart, StyleChain,
-};
+use crate::foundations::{cast, elem, scope, Array, Content, NativeElement, Smart};
+use crate::introspection::Context;
 use crate::layout::{
     BlockElem, Em, Fragment, HElem, Layout, Length, Regions, Spacing, VElem,
 };
@@ -112,9 +111,10 @@ impl Layout for TermsElem {
     fn layout(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment> {
+        let styles = context.styles;
         let separator = self.separator(styles);
         let indent = self.indent(styles);
         let hanging_indent = self.hanging_indent(styles);
@@ -140,7 +140,7 @@ impl Layout for TermsElem {
 
         Content::sequence(seq)
             .styled(ParElem::set_hanging_indent(hanging_indent + indent))
-            .layout(engine, styles, regions)
+            .layout(engine, context, regions)
     }
 }
 

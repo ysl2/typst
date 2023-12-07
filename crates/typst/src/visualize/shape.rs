@@ -2,7 +2,8 @@ use std::f64::consts::SQRT_2;
 
 use crate::diag::SourceResult;
 use crate::engine::Engine;
-use crate::foundations::{elem, Content, NativeElement, Resolve, Smart, StyleChain};
+use crate::foundations::{elem, Content, NativeElement, Resolve, Smart};
+use crate::introspection::Context;
 use crate::layout::{
     Abs, Axes, Corner, Corners, Fragment, Frame, FrameItem, Layout, Length, Point, Ratio,
     Regions, Rel, Sides, Size,
@@ -136,12 +137,13 @@ impl Layout for RectElem {
     fn layout(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment> {
+        let styles = context.styles;
         layout(
             engine,
-            styles,
+            context,
             regions,
             ShapeKind::Rect,
             &self.body(styles),
@@ -242,12 +244,13 @@ impl Layout for SquareElem {
     fn layout(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment> {
+        let styles = context.styles;
         layout(
             engine,
-            styles,
+            context,
             regions,
             ShapeKind::Square,
             &self.body(styles),
@@ -320,12 +323,13 @@ impl Layout for EllipseElem {
     fn layout(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment> {
+        let styles = context.styles;
         layout(
             engine,
-            styles,
+            context,
             regions,
             ShapeKind::Ellipse,
             &self.body(styles),
@@ -423,12 +427,13 @@ impl Layout for CircleElem {
     fn layout(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment> {
+        let styles = context.styles;
         layout(
             engine,
-            styles,
+            context,
             regions,
             ShapeKind::Circle,
             &self.body(styles),
@@ -448,7 +453,7 @@ impl Layout for CircleElem {
 #[allow(clippy::too_many_arguments)]
 fn layout(
     engine: &mut Engine,
-    styles: StyleChain,
+    context: Context,
     regions: Regions,
     kind: ShapeKind,
     body: &Option<Content>,
@@ -460,6 +465,7 @@ fn layout(
     radius: Corners<Rel<Abs>>,
     span: Span,
 ) -> SourceResult<Fragment> {
+    let styles = context.styles;
     let resolved = sizing
         .zip_map(regions.base(), |s, r| s.map(|v| v.resolve(styles).relative_to(r)));
 
@@ -474,7 +480,7 @@ fn layout(
         let child = child.clone().padded(inset.map(|side| side.map(Length::from)));
         let expand = sizing.as_ref().map(Smart::is_custom);
         let pod = Regions::one(region, expand);
-        frame = child.layout(engine, styles, pod)?.into_frame();
+        frame = child.layout(engine, context.clone(), pod)?.into_frame();
 
         // Enforce correct size.
         *frame.size_mut() = expand.select(region, frame.size());
@@ -485,7 +491,7 @@ fn layout(
             frame.set_size(Size::splat(frame.size().max_by_side()));
             let length = frame.size().max_by_side().min(region.min_by_side());
             let pod = Regions::one(Size::splat(length), Axes::splat(true));
-            frame = child.layout(engine, styles, pod)?.into_frame();
+            frame = child.layout(engine, context, pod)?.into_frame();
         }
 
         // Enforce correct size again.

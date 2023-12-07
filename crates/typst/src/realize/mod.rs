@@ -16,7 +16,7 @@ use crate::foundations::{
     Content, Finalize, Guard, NativeElement, Recipe, Selector, Show, StyleChain,
     StyleVecBuilder, Styles, Synthesize,
 };
-use crate::introspection::{Locatable, Meta, MetaElem};
+use crate::introspection::{Context, Locatable, Location, Locator, Meta, MetaElem};
 use crate::layout::{
     AlignElem, BlockElem, BoxElem, ColbreakElem, FlowElem, HElem, Layout, LayoutRoot,
     PageElem, PagebreakElem, Parity, PlaceElem, VElem,
@@ -28,7 +28,6 @@ use crate::model::{
 };
 use crate::syntax::Span;
 use crate::text::{LinebreakElem, SmartQuoteElem, SpaceElem, TextElem};
-use crate::util::hash128;
 use crate::visualize::{
     CircleElem, EllipseElem, ImageElem, LineElem, PathElem, PolygonElem, RectElem,
     SquareElem,
@@ -40,15 +39,15 @@ pub fn realize_root<'a>(
     engine: &mut Engine,
     scratch: &'a Scratch<'a>,
     content: &'a Content,
-    styles: StyleChain<'a>,
+    context: Context<'a>,
 ) -> SourceResult<(Cow<'a, Content>, StyleChain<'a>)> {
-    if content.can::<dyn LayoutRoot>() && !applicable(content, styles) {
-        return Ok((Cow::Borrowed(content), styles));
+    if content.can::<dyn LayoutRoot>() && !applicable(content, context.styles) {
+        return Ok((Cow::Borrowed(content), context.styles));
     }
 
-    let mut builder = Builder::new(engine, scratch, true);
-    builder.accept(content, styles)?;
-    builder.interrupt_page(Some(styles), true)?;
+    let mut builder = Builder::new(engine, scratch, context.location, true);
+    builder.accept(content, context.styles)?;
+    builder.interrupt_page(Some(context.styles), true)?;
     let (pages, shared) = builder.doc.unwrap().pages.finish();
     Ok((Cow::Owned(DocumentElem::new(pages.to_vec()).pack()), shared))
 }
@@ -59,7 +58,7 @@ pub fn realize_block<'a>(
     engine: &mut Engine,
     scratch: &'a Scratch<'a>,
     content: &'a Content,
-    styles: StyleChain<'a>,
+    context: Context<'a>,
 ) -> SourceResult<(Cow<'a, Content>, StyleChain<'a>)> {
     // These elements implement `Layout` but still require a flow for
     // proper layout.
@@ -74,13 +73,13 @@ pub fn realize_block<'a>(
         && !content.is::<PolygonElem>()
         && !content.is::<PathElem>()
         && !content.is::<PlaceElem>()
-        && !applicable(content, styles)
+        && !applicable(content, context.styles)
     {
-        return Ok((Cow::Borrowed(content), styles));
+        return Ok((Cow::Borrowed(content), context.styles));
     }
 
-    let mut builder = Builder::new(engine, scratch, false);
-    builder.accept(content, styles)?;
+    let mut builder = Builder::new(engine, scratch, context.location, false);
+    builder.accept(content, context.styles)?;
     builder.interrupt_par()?;
     let (children, shared) = builder.flow.0.finish();
     Ok((Cow::Owned(FlowElem::new(children.to_vec()).pack()), shared))
@@ -113,6 +112,7 @@ pub fn applicable(target: &Content, styles: StyleChain) -> bool {
 /// Apply the show rules in the given style chain to a target.
 pub fn realize(
     engine: &mut Engine,
+    locator: &mut Locator,
     target: &Content,
     styles: StyleChain,
 ) -> SourceResult<Option<Content>> {
@@ -120,8 +120,7 @@ pub fn realize(
     if target.needs_preparation() {
         let mut elem = target.clone();
         if target.can::<dyn Locatable>() || target.label().is_some() {
-            let location = engine.locator.locate(hash128(target));
-            elem.set_location(location);
+            elem.set_location(locator.generate_location(target));
         }
 
         if let Some(elem) = elem.with_mut::<dyn Synthesize>() {
@@ -261,6 +260,8 @@ struct Builder<'a, 'v, 't> {
     engine: &'v mut Engine<'t>,
     /// Scratch arenas for building.
     scratch: &'a Scratch<'a>,
+    /// The locator.
+    locator: Locator,
     /// The current document building state.
     doc: Option<DocBuilder<'a>>,
     /// The current flow building state.
@@ -283,10 +284,16 @@ pub struct Scratch<'a> {
 }
 
 impl<'a, 'v, 't> Builder<'a, 'v, 't> {
-    fn new(engine: &'v mut Engine<'t>, scratch: &'a Scratch<'a>, top: bool) -> Self {
+    fn new(
+        engine: &'v mut Engine<'t>,
+        scratch: &'a Scratch<'a>,
+        location: Location,
+        top: bool,
+    ) -> Self {
         Self {
             engine,
             scratch,
+            locator: Locator::new(location),
             doc: top.then(DocBuilder::default),
             flow: FlowBuilder::default(),
             par: ParBuilder::default(),
@@ -305,7 +312,8 @@ impl<'a, 'v, 't> Builder<'a, 'v, 't> {
                 self.scratch.content.alloc(EquationElem::new(content.clone()).pack());
         }
 
-        if let Some(realized) = realize(self.engine, content, styles)? {
+        if let Some(realized) = realize(self.engine, &mut self.locator, content, styles)?
+        {
             self.engine.route.increase();
             if !self.engine.route.within(Route::MAX_SHOW_RULE_DEPTH) {
                 bail!(

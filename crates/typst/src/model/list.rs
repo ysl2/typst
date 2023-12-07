@@ -1,9 +1,9 @@
 use crate::diag::{bail, SourceResult};
 use crate::engine::Engine;
 use crate::foundations::{
-    cast, elem, scope, Array, Content, Fold, Func, NativeElement, Smart, StyleChain,
-    Value,
+    cast, elem, scope, Array, Content, Fold, Func, NativeElement, Smart, Value,
 };
+use crate::introspection::Context;
 use crate::layout::{
     Axes, BlockElem, Em, Fragment, GridLayouter, HAlign, Layout, Length, Regions, Sizing,
     Spacing, VAlign,
@@ -132,9 +132,10 @@ impl Layout for ListElem {
     fn layout(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment> {
+        let styles = context.styles;
         let indent = self.indent(styles);
         let body_indent = self.body_indent(styles);
         let gutter = if self.tight(styles) {
@@ -169,7 +170,7 @@ impl Layout for ListElem {
             Axes::with_y(&[gutter.into()]),
             &cells,
             regions,
-            styles,
+            context,
             self.span(),
         );
 

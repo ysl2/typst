@@ -74,8 +74,9 @@ use comemo::{Tracked, TrackedMut};
 use crate::diag::{bail, SourceResult};
 use crate::engine::{Engine, Route};
 use crate::eval::Tracer;
-use crate::foundations::{category, Category, Content, Scope, StyleChain};
-use crate::introspection::{Introspector, Locator};
+use crate::foundations::{category, Category, Content, Scope};
+use crate::introspection::Context;
+use crate::introspection::Introspector;
 use crate::model::Document;
 use crate::realize::{realize_block, realize_root, Scratch};
 use crate::World;
@@ -124,7 +125,7 @@ pub trait LayoutRoot {
     fn layout_root(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
     ) -> SourceResult<Document>;
 }
 
@@ -134,31 +135,9 @@ pub trait Layout {
     fn layout(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment>;
-
-    /// Layout without side effects.
-    ///
-    /// This element must be layouted again in the same order for the results to
-    /// be valid.
-    #[tracing::instrument(name = "Layout::measure", skip_all)]
-    fn measure(
-        &self,
-        engine: &mut Engine,
-        styles: StyleChain,
-        regions: Regions,
-    ) -> SourceResult<Fragment> {
-        let mut locator = Locator::chained(engine.locator.track());
-        let mut engine = Engine {
-            world: engine.world,
-            route: engine.route.clone(),
-            introspector: engine.introspector,
-            locator: &mut locator,
-            tracer: TrackedMut::reborrow_mut(&mut engine.tracer),
-        };
-        self.layout(&mut engine, styles, regions)
-    }
 }
 
 impl LayoutRoot for Content {
@@ -166,7 +145,7 @@ impl LayoutRoot for Content {
     fn layout_root(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
     ) -> SourceResult<Document> {
         #[comemo::memoize]
         fn cached(
@@ -174,25 +153,22 @@ impl LayoutRoot for Content {
             world: Tracked<dyn World + '_>,
             introspector: Tracked<Introspector>,
             route: Tracked<Route>,
-            locator: Tracked<Locator>,
             tracer: TrackedMut<Tracer>,
-            styles: StyleChain,
+            context: Context,
         ) -> SourceResult<Document> {
-            let mut locator = Locator::chained(locator);
             let mut engine = Engine {
                 world,
                 introspector,
                 route: Route::extend(route).unnested(),
-                locator: &mut locator,
                 tracer,
             };
             let scratch = Scratch::default();
             let (realized, styles) =
-                realize_root(&mut engine, &scratch, content, styles)?;
+                realize_root(&mut engine, &scratch, content, context.variant(1))?;
             realized
                 .with::<dyn LayoutRoot>()
                 .unwrap()
-                .layout_root(&mut engine, styles)
+                .layout_root(&mut engine, Context { styles, ..context.variant(2) })
         }
 
         tracing::info!("Starting layout");
@@ -201,9 +177,8 @@ impl LayoutRoot for Content {
             engine.world,
             engine.introspector,
             engine.route.track(),
-            engine.locator.track(),
             TrackedMut::reborrow_mut(&mut engine.tracer),
-            styles,
+            context,
         )
     }
 }
@@ -213,7 +188,7 @@ impl Layout for Content {
     fn layout(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment> {
         #[allow(clippy::too_many_arguments)]
@@ -223,17 +198,14 @@ impl Layout for Content {
             world: Tracked<dyn World + '_>,
             introspector: Tracked<Introspector>,
             route: Tracked<Route>,
-            locator: Tracked<Locator>,
             tracer: TrackedMut<Tracer>,
-            styles: StyleChain,
+            context: Context,
             regions: Regions,
         ) -> SourceResult<Fragment> {
-            let mut locator = Locator::chained(locator);
             let mut engine = Engine {
                 world,
                 introspector,
                 route: Route::extend(route),
-                locator: &mut locator,
                 tracer,
             };
 
@@ -246,27 +218,24 @@ impl Layout for Content {
 
             let scratch = Scratch::default();
             let (realized, styles) =
-                realize_block(&mut engine, &scratch, content, styles)?;
-            realized
-                .with::<dyn Layout>()
-                .unwrap()
-                .layout(&mut engine, styles, regions)
+                realize_block(&mut engine, &scratch, content, context.variant(1))?;
+            realized.with::<dyn Layout>().unwrap().layout(
+                &mut engine,
+                Context { styles, ..context.variant(2) },
+                regions,
+            )
         }
 
         tracing::info!("Layouting `Content`");
 
-        let fragment = cached(
+        cached(
             self,
             engine.world,
             engine.introspector,
             engine.route.track(),
-            engine.locator.track(),
             TrackedMut::reborrow_mut(&mut engine.tracer),
-            styles,
+            context,
             regions,
-        )?;
-
-        engine.locator.visit_frames(&fragment);
-        Ok(fragment)
+        )
     }
 }

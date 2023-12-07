@@ -65,10 +65,9 @@ use ecow::{EcoString, EcoVec};
 use crate::diag::{warning, FileResult, SourceDiagnostic, SourceResult};
 use crate::engine::{Engine, Route};
 use crate::eval::Tracer;
-use crate::foundations::{
-    Array, Bytes, Content, Datetime, Module, Scope, StyleChain, Styles,
-};
-use crate::introspection::{Introspector, Locator};
+use crate::foundations::{Array, Bytes, Content, Datetime, Module, Scope, Styles};
+use crate::introspection::Context;
+use crate::introspection::Introspector;
 use crate::layout::{Align, Dir, LayoutRoot};
 use crate::model::Document;
 use crate::syntax::{FileId, PackageSpec, Source, Span};
@@ -108,7 +107,6 @@ fn typeset(
     content: &Content,
 ) -> SourceResult<Document> {
     let library = world.library();
-    let styles = StyleChain::new(&library.styles);
 
     let mut iter = 0;
     let mut document = Document::default();
@@ -122,17 +120,16 @@ fn typeset(
         tracer.delayed();
 
         let constraint = <Introspector as Validate>::Constraint::new();
-        let mut locator = Locator::new();
         let mut engine = Engine {
             world,
             route: Route::default(),
             tracer: tracer.track_mut(),
-            locator: &mut locator,
             introspector: document.introspector.track_with(&constraint),
         };
 
         // Layout!
-        document = content.layout_root(&mut engine, styles)?;
+        let context = Context::root(&library.styles);
+        document = content.layout_root(&mut engine, context)?;
         document.introspector.rebuild(&document.pages);
         iter += 1;
 

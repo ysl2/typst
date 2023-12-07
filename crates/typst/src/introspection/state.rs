@@ -8,7 +8,7 @@ use crate::foundations::{
     cast, elem, func, scope, select_where, ty, Content, Func, NativeElement, Repr,
     Selector, Show, Str, StyleChain, Value,
 };
-use crate::introspection::{Introspector, Locatable, Location, Locator};
+use crate::introspection::{Introspector, Locatable, Location};
 use crate::World;
 
 /// Manages stateful parts of your document.
@@ -209,7 +209,6 @@ impl State {
             engine.world,
             engine.introspector,
             engine.route.track(),
-            engine.locator.track(),
             TrackedMut::reborrow_mut(&mut engine.tracer),
         )
     }
@@ -221,15 +220,12 @@ impl State {
         world: Tracked<dyn World + '_>,
         introspector: Tracked<Introspector>,
         route: Tracked<Route>,
-        locator: Tracked<Locator>,
         tracer: TrackedMut<Tracer>,
     ) -> SourceResult<EcoVec<Value>> {
-        let mut locator = Locator::chained(locator);
         let mut engine = Engine {
             world,
             introspector,
             route: Route::extend(route).unnested(),
-            locator: &mut locator,
             tracer,
         };
         let mut state = self.init.clone();

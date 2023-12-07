@@ -7,8 +7,9 @@ use crate::diag::{bail, SourceResult};
 use crate::engine::Engine;
 use crate::foundations::{
     cast, elem, AutoValue, Cast, Content, Dict, Fold, Func, NativeElement, Resolve,
-    Smart, StyleChain, Value,
+    Smart, Value,
 };
+use crate::introspection::{Context, Locator};
 use crate::introspection::{Counter, CounterKey, ManualPageCounter, Meta};
 use crate::layout::{
     Abs, Align, AlignElem, Axes, ColumnsElem, Dir, Fragment, Frame, HAlign, Layout,
@@ -344,11 +345,14 @@ impl PageElem {
     pub fn layout(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         page_counter: &mut ManualPageCounter,
         extend_to: Option<Parity>,
     ) -> SourceResult<Fragment> {
         tracing::info!("Page layout");
+
+        let styles = context.styles;
+        let mut locator = Locator::new(context.location);
 
         // When one of the lengths is infinite the page fits its content along
         // that axis.
@@ -394,7 +398,9 @@ impl PageElem {
         regions.root = true;
 
         // Layout the child.
-        let mut frames = child.layout(engine, styles, regions)?.into_frames();
+        let mut frames = child
+            .layout(engine, locator.generate(styles, self.span), regions)?
+            .into_frames();
 
         // Align the child to the pagebreak's parity.
         // Check for page count after adding the pending frames
@@ -497,7 +503,7 @@ impl PageElem {
                 let sub = content
                     .clone()
                     .styled(AlignElem::set_alignment(align))
-                    .layout(engine, styles, pod)?
+                    .layout(engine, locator.generate(styles, content.span()), pod)?
                     .into_frame();
 
                 if ptr::eq(marginal, &header) || ptr::eq(marginal, &background) {

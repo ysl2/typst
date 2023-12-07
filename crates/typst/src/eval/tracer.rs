@@ -18,7 +18,7 @@ pub struct Tracer {
 }
 
 impl Tracer {
-    /// The maximum number of inspeted values.
+    /// The maximum number of inspected values.
     pub const MAX_VALUES: usize = 10;
 
     /// Create a new tracer.

@@ -8,7 +8,7 @@ use crate::foundations::{
     call_method_mut, is_mutating_method, Arg, Args, Bytes, Closure, Content, Func,
     IntoValue, NativeElement, Scope, Scopes, Value,
 };
-use crate::introspection::{Introspector, Locator};
+use crate::introspection::Introspector;
 use crate::math::{Accent, AccentElem, LrElem};
 use crate::symbols::Symbol;
 use crate::syntax::ast::{self, AstNode};
@@ -248,7 +248,6 @@ pub(crate) fn call_closure(
     world: Tracked<dyn World + '_>,
     introspector: Tracked<Introspector>,
     route: Tracked<Route>,
-    locator: Tracked<Locator>,
     tracer: TrackedMut<Tracer>,
     mut args: Args,
 ) -> SourceResult<Value> {
@@ -260,12 +259,10 @@ pub(crate) fn call_closure(
     scopes.top = closure.captured.clone();
 
     // Prepare the engine.
-    let mut locator = Locator::chained(locator);
     let engine = Engine {
         world,
         introspector,
         route: Route::extend(route),
-        locator: &mut locator,
         tracer,
     };
 

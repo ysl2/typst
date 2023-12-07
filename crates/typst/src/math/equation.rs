@@ -6,6 +6,7 @@ use crate::foundations::{
     elem, Content, Finalize, Guard, NativeElement, Resolve, Show, Smart, StyleChain,
     Synthesize,
 };
+use crate::introspection::Context;
 use crate::introspection::{Count, Counter, CounterUpdate, Locatable};
 use crate::layout::{
     Abs, Align, AlignElem, Axes, Dir, Em, FixedAlign, Fragment, Layout, Point, Regions,
@@ -141,11 +142,13 @@ impl Layout for EquationElem {
     fn layout(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment> {
         const NUMBER_GUTTER: Em = Em::new(0.5);
 
+        let styles = context.styles;
+        let numbering_context = context.variant(1);
         let block = self.block(styles);
 
         // Find a math font.
@@ -160,7 +163,8 @@ impl Layout for EquationElem {
             bail!(self.span(), "current font does not support math");
         };
 
-        let mut ctx = MathContext::new(engine, styles, regions, &font, block);
+        // TODO: Math locations.
+        let mut ctx = MathContext::new(engine, context, regions, &font, block);
         let mut frame = ctx.layout_frame(self)?;
 
         if block {
@@ -168,7 +172,7 @@ impl Layout for EquationElem {
                 let pod = Regions::one(regions.base(), Axes::splat(false));
                 let counter = Counter::of(Self::elem())
                     .display(Some(numbering), false)
-                    .layout(engine, styles, pod)?
+                    .layout(engine, numbering_context, pod)?
                     .into_frame();
 
                 let full_counter_width = counter.width() + NUMBER_GUTTER.resolve(styles);

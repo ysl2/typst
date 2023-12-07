@@ -3,9 +3,9 @@ use comemo::Prehashed;
 use crate::diag::SourceResult;
 use crate::engine::Engine;
 use crate::foundations::{
-    elem, Args, Cast, Construct, Content, NativeElement, Set, Smart, StyleChain,
-    Unlabellable,
+    elem, Args, Cast, Construct, Content, NativeElement, Set, Smart, Unlabellable,
 };
+use crate::introspection::Context;
 use crate::layout::{Em, Fragment, Length, Size};
 
 /// Arranges text, spacing and inline-level elements into a paragraph.
@@ -128,7 +128,7 @@ impl ParElem {
     pub fn layout(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         consecutive: bool,
         region: Size,
         expand: bool,
@@ -136,7 +136,7 @@ impl ParElem {
         crate::layout::layout_inline(
             self.children(),
             engine,
-            styles,
+            context,
             consecutive,
             region,
             expand,

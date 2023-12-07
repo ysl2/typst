@@ -1,6 +1,7 @@
 use crate::diag::{bail, SourceResult};
 use crate::engine::Engine;
-use crate::foundations::{elem, Content, NativeElement, Resolve, StyleChain};
+use crate::foundations::{elem, Content, NativeElement, Resolve};
+use crate::introspection::Context;
 use crate::layout::{
     Abs, AlignElem, Axes, Fragment, Frame, Layout, Point, Regions, Size,
 };
@@ -39,11 +40,12 @@ impl Layout for RepeatElem {
     fn layout(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment> {
+        let styles = context.styles;
         let pod = Regions::one(regions.size, Axes::new(false, false));
-        let piece = self.body().layout(engine, styles, pod)?.into_frame();
+        let piece = self.body().layout(engine, context, pod)?.into_frame();
         let align = AlignElem::alignment_in(styles).resolve(styles);
 
         let fill = regions.size.x;

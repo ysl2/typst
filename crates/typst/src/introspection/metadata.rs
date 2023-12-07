@@ -31,7 +31,7 @@ pub struct MetadataElem {
 }
 
 impl Show for MetadataElem {
-    fn show(&self, _: &mut Engine, _styles: StyleChain) -> SourceResult<Content> {
+    fn show(&self, _: &mut Engine, _: StyleChain) -> SourceResult<Content> {
         Ok(Content::empty())
     }
 }

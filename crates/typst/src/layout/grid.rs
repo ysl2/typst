@@ -7,6 +7,7 @@ use crate::engine::Engine;
 use crate::foundations::{
     cast, elem, Array, Content, NativeElement, Resolve, StyleChain, Value,
 };
+use crate::introspection::{Context, Location, Locator};
 use crate::layout::{
     Abs, Axes, Dir, Fr, Fragment, Frame, Layout, Length, Point, Regions, Rel, Size,
     Sizing,
@@ -130,9 +131,10 @@ impl Layout for GridElem {
     fn layout(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment> {
+        let styles = context.styles;
         let columns = self.columns(styles);
         let rows = self.rows(styles);
         let column_gutter = self.column_gutter(styles);
@@ -144,7 +146,7 @@ impl Layout for GridElem {
             Axes::new(&column_gutter.0, &row_gutter.0),
             &self.children,
             regions,
-            styles,
+            context,
             self.span(),
         );
 
@@ -179,8 +181,10 @@ pub struct GridLayouter<'a> {
     rows: Vec<Sizing>,
     /// The regions to layout children into.
     regions: Regions<'a>,
-    /// The inherited styles.
+    /// The shared styles.
     styles: StyleChain<'a>,
+    /// Locations of the cells.
+    locations: Vec<Location>,
     /// Resolved column sizes.
     rcols: Vec<Abs>,
     /// The sum of `rcols`.
@@ -235,7 +239,7 @@ impl<'a> GridLayouter<'a> {
         gutter: Axes<&[Sizing]>,
         cells: &'a [Content],
         regions: Regions<'a>,
-        styles: StyleChain<'a>,
+        context: Context<'a>,
         span: Span,
     ) -> Self {
         let mut cols = vec![];
@@ -283,7 +287,7 @@ impl<'a> GridLayouter<'a> {
         }
 
         // Reverse for RTL.
-        let is_rtl = TextElem::dir_in(styles) == Dir::RTL;
+        let is_rtl = TextElem::dir_in(context.styles) == Dir::RTL;
         if is_rtl {
             cols.reverse();
         }
@@ -293,13 +297,20 @@ impl<'a> GridLayouter<'a> {
         let mut regions = regions;
         regions.expand = Axes::new(true, false);
 
+        let mut locator = Locator::new(context.location);
+        let locations = cells
+            .iter()
+            .map(|cell| locator.generate_location(cell.span()))
+            .collect();
+
         Self {
             cells,
             is_rtl,
             has_gutter,
             rows,
             regions,
-            styles,
+            styles: context.styles,
+            locations,
             rcols: vec![Abs::zero(); cols.len()],
             cols,
             width: Abs::zero(),
@@ -402,7 +413,7 @@ impl<'a> GridLayouter<'a> {
 
             let mut resolved = Abs::zero();
             for y in 0..self.rows.len() {
-                if let Some(cell) = self.cell(x, y) {
+                if let Some((cell, context)) = self.cell(x, y) {
                     // For relative rows, we can already resolve the correct
                     // base and for auto and fr we could only guess anyway.
                     let height = match self.rows[y] {
@@ -414,7 +425,7 @@ impl<'a> GridLayouter<'a> {
 
                     let size = Size::new(available, height);
                     let pod = Regions::one(size, Axes::splat(false));
-                    let frame = cell.measure(engine, self.styles, pod)?.into_frame();
+                    let frame = cell.layout(engine, context, pod)?.into_frame();
                     resolved.set_max(frame.width());
                 }
             }
@@ -534,11 +545,11 @@ impl<'a> GridLayouter<'a> {
         let mut resolved: Vec<Abs> = vec![];
 
         for (x, &rcol) in self.rcols.iter().enumerate() {
-            if let Some(cell) = self.cell(x, y) {
+            if let Some((cell, context)) = self.cell(x, y) {
                 let mut pod = self.regions;
                 pod.size.x = rcol;
 
-                let frames = cell.measure(engine, self.styles, pod)?.into_frames();
+                let frames = cell.layout(engine, context, pod)?.into_frames();
 
                 // Skip the first region if one cell in it is empty. Then,
                 // remeasure.
@@ -607,13 +618,13 @@ impl<'a> GridLayouter<'a> {
         let mut pos = Point::zero();
 
         for (x, &rcol) in self.rcols.iter().enumerate() {
-            if let Some(cell) = self.cell(x, y) {
+            if let Some((cell, context)) = self.cell(x, y) {
                 let size = Size::new(rcol, height);
                 let mut pod = Regions::one(size, Axes::splat(true));
                 if self.rows[y] == Sizing::Auto {
                     pod.full = self.regions.full;
                 }
-                let frame = cell.layout(engine, self.styles, pod)?.into_frame();
+                let frame = cell.layout(engine, context, pod)?.into_frame();
                 output.push_frame(pos, frame);
             }
 
@@ -645,11 +656,11 @@ impl<'a> GridLayouter<'a> {
         // Layout the row.
         let mut pos = Point::zero();
         for (x, &rcol) in self.rcols.iter().enumerate() {
-            if let Some(cell) = self.cell(x, y) {
+            if let Some((cell, context)) = self.cell(x, y) {
                 pod.size.x = rcol;
 
                 // Push the layouted frames into the individual output frames.
-                let fragment = cell.layout(engine, self.styles, pod)?;
+                let fragment = cell.layout(engine, context, pod)?;
                 for (output, frame) in outputs.iter_mut().zip(fragment) {
                     output.push_frame(pos, frame);
                 }
@@ -720,7 +731,7 @@ impl<'a> GridLayouter<'a> {
     ///
     /// Returns `None` if it's a gutter cell.
     #[track_caller]
-    fn cell(&self, mut x: usize, y: usize) -> Option<&'a Content> {
+    fn cell(&self, mut x: usize, y: usize) -> Option<(&'a Content, Context<'a>)> {
         assert!(x < self.cols.len());
         assert!(y < self.rows.len());
 
@@ -729,17 +740,21 @@ impl<'a> GridLayouter<'a> {
             x = self.cols.len() - 1 - x;
         }
 
-        if self.has_gutter {
+        let i = if self.has_gutter {
             // Even columns and rows are children, odd ones are gutter.
             if x % 2 == 0 && y % 2 == 0 {
                 let c = 1 + self.cols.len() / 2;
-                self.cells.get((y / 2) * c + x / 2)
+                (y / 2) * c + x / 2
             } else {
-                None
+                return None;
             }
         } else {
             let c = self.cols.len();
-            self.cells.get(y * c + x)
-        }
+            y * c + x
+        };
+
+        let cell = self.cells.get(i)?;
+        let location = *self.locations.get(i)?;
+        Some((cell, Context { styles: self.styles, location }))
     }
 }

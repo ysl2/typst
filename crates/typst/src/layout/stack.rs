@@ -3,6 +3,7 @@ use std::fmt::{self, Debug, Formatter};
 use crate::diag::SourceResult;
 use crate::engine::Engine;
 use crate::foundations::{cast, elem, Content, Resolve, StyleChain};
+use crate::introspection::{Context, Locator};
 use crate::layout::{
     Abs, AlignElem, Axes, Axis, Dir, FixedAlign, Fr, Fragment, Frame, Layout, Point,
     Regions, Size, Spacing,
@@ -56,13 +57,14 @@ impl Layout for StackElem {
     fn layout(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment> {
-        let mut layouter = StackLayouter::new(self.dir(styles), regions, styles);
-
-        // Spacing to insert before the next block.
+        let styles = context.styles;
+        let dir = self.dir(styles);
         let spacing = self.spacing(styles);
+
+        let mut layouter = StackLayouter::new(dir, regions, context);
         let mut deferred = None;
 
         for child in self.children() {
@@ -76,7 +78,7 @@ impl Layout for StackElem {
                         layouter.layout_spacing(kind);
                     }
 
-                    layouter.layout_block(engine, block, styles)?;
+                    layouter.layout_block(engine, block)?;
                     deferred = spacing;
                 }
             }
@@ -122,8 +124,10 @@ struct StackLayouter<'a> {
     axis: Axis,
     /// The regions to layout children into.
     regions: Regions<'a>,
-    /// The inherited styles.
+    /// The shared styles.
     styles: StyleChain<'a>,
+    /// Produces suitable contexts for layouting the stack's children.
+    locator: Locator,
     /// Whether the stack itself should expand to fill the region.
     expand: Axes<bool>,
     /// The initial size of the current region before we started subtracting.
@@ -151,7 +155,7 @@ enum StackItem {
 
 impl<'a> StackLayouter<'a> {
     /// Create a new stack layouter.
-    fn new(dir: Dir, mut regions: Regions<'a>, styles: StyleChain<'a>) -> Self {
+    fn new(dir: Dir, mut regions: Regions<'a>, context: Context<'a>) -> Self {
         let axis = dir.axis();
         let expand = regions.expand;
 
@@ -162,7 +166,8 @@ impl<'a> StackLayouter<'a> {
             dir,
             axis,
             regions,
-            styles,
+            styles: context.styles,
+            locator: Locator::new(context.location),
             expand,
             initial: regions.size,
             used: Gen::zero(),
@@ -198,27 +203,27 @@ impl<'a> StackLayouter<'a> {
 
     /// Layout an arbitrary block.
     #[tracing::instrument(name = "StackLayouter::layout_block", skip_all)]
-    fn layout_block(
-        &mut self,
-        engine: &mut Engine,
-        block: &Content,
-        styles: StyleChain,
-    ) -> SourceResult<()> {
+    fn layout_block(&mut self, engine: &mut Engine, block: &Content) -> SourceResult<()> {
         if self.regions.is_full() {
             self.finish_region();
         }
 
         // Block-axis alignment of the `AlignElement` is respected by stacks.
         let align = if let Some(align) = block.to::<AlignElem>() {
-            align.alignment(styles)
+            align.alignment(self.styles)
         } else if let Some((_, local)) = block.to_styled() {
-            AlignElem::alignment_in(styles.chain(local))
+            AlignElem::alignment_in(self.styles.chain(local))
         } else {
-            AlignElem::alignment_in(styles)
+            AlignElem::alignment_in(self.styles)
         }
-        .resolve(styles);
+        .resolve(self.styles);
 
-        let fragment = block.layout(engine, styles, self.regions)?;
+        let fragment = block.layout(
+            engine,
+            self.locator.generate(self.styles, block.span()),
+            self.regions,
+        )?;
+
         let len = fragment.len();
         for (i, frame) in fragment.into_iter().enumerate() {
             // Grow our size, shrink the region and save the frame for later.

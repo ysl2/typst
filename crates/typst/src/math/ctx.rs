@@ -11,6 +11,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::diag::SourceResult;
 use crate::engine::Engine;
 use crate::foundations::{Content, NativeElement, Smart, StyleChain, Styles};
+use crate::introspection::{Context, Locator};
 use crate::layout::{Abs, Axes, BoxElem, Em, Frame, Layout, Regions, Size};
 use crate::math::{
     FrameFragment, GlyphFragment, LayoutMath, MathFragment, MathRow, MathSize, MathStyle,
@@ -45,6 +46,7 @@ macro_rules! percent {
 /// The context for math layout.
 pub struct MathContext<'a, 'b, 'v> {
     pub engine: &'v mut Engine<'b>,
+    pub locator: Locator,
     pub regions: Regions<'static>,
     pub font: &'a Font,
     pub ttf: &'a ttf_parser::Face<'a>,
@@ -64,11 +66,12 @@ pub struct MathContext<'a, 'b, 'v> {
 impl<'a, 'b, 'v> MathContext<'a, 'b, 'v> {
     pub fn new(
         engine: &'v mut Engine<'b>,
-        styles: StyleChain<'a>,
+        context: Context<'a>,
         regions: Regions,
         font: &'a Font,
         block: bool,
     ) -> Self {
+        let styles = context.styles;
         let math_table = font.ttf().tables().math.unwrap();
         let gsub_table = font.ttf().tables().gsub;
         let constants = math_table.constants.unwrap();
@@ -105,6 +108,7 @@ impl<'a, 'b, 'v> MathContext<'a, 'b, 'v> {
         let variant = variant(styles);
         Self {
             engine,
+            locator: Locator::new(context.location),
             regions: Regions::one(regions.base(), Axes::splat(false)),
             font,
             ttf: font.ttf(),
@@ -168,13 +172,21 @@ impl<'a, 'b, 'v> MathContext<'a, 'b, 'v> {
 
     pub fn layout_box(&mut self, boxed: &BoxElem) -> SourceResult<Frame> {
         Ok(boxed
-            .layout(self.engine, self.outer.chain(&self.local), self.regions)?
+            .layout(
+                self.engine,
+                self.locator.generate(self.outer.chain(&self.local), boxed.span()),
+                self.regions,
+            )?
             .into_frame())
     }
 
     pub fn layout_content(&mut self, content: &Content) -> SourceResult<Frame> {
         Ok(content
-            .layout(self.engine, self.outer.chain(&self.local), self.regions)?
+            .layout(
+                self.engine,
+                self.locator.generate(self.outer.chain(&self.local), content.span()),
+                self.regions,
+            )?
             .into_frame())
     }
 
@@ -272,7 +284,7 @@ impl<'a, 'b, 'v> MathContext<'a, 'b, 'v> {
             .spanned(span)
             .layout(
                 self.engine,
-                self.outer.chain(&self.local),
+                self.locator.generate(self.outer.chain(&self.local), span),
                 false,
                 Size::splat(Abs::inf()),
                 false,
@@ -289,7 +301,7 @@ impl<'a, 'b, 'v> MathContext<'a, 'b, 'v> {
     }
 
     pub fn realize(&mut self, content: &Content) -> SourceResult<Option<Content>> {
-        realize(self.engine, content, self.outer.chain(&self.local))
+        realize(self.engine, &mut self.locator, content, self.outer.chain(&self.local))
     }
 
     pub fn style(&mut self, style: MathStyle) {

@@ -3,8 +3,9 @@ use kurbo::{CubicBez, ParamCurveExtrema};
 use crate::diag::{bail, SourceResult};
 use crate::engine::Engine;
 use crate::foundations::{
-    array, cast, elem, Array, NativeElement, Reflect, Resolve, Smart, StyleChain,
+    array, cast, elem, Array, NativeElement, Reflect, Resolve, Smart,
 };
+use crate::introspection::Context;
 use crate::layout::{
     Abs, Axes, Fragment, Frame, FrameItem, Layout, Length, Point, Regions, Rel, Size,
 };
@@ -75,9 +76,10 @@ impl Layout for PathElem {
     fn layout(
         &self,
         _: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment> {
+        let styles = context.styles;
         let resolve = |axes: Axes<Rel<Length>>| {
             axes.resolve(styles)
                 .zip_map(regions.base(), Rel::relative_to)

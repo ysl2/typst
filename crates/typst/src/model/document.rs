@@ -3,9 +3,10 @@ use ecow::EcoString;
 use crate::diag::{bail, SourceResult, StrResult};
 use crate::engine::Engine;
 use crate::foundations::{
-    cast, elem, Args, Array, Construct, Content, Datetime, Smart, StyleChain, Value,
+    cast, elem, Args, Array, Construct, Content, Datetime, Smart, Value,
 };
-use crate::introspection::{Introspector, ManualPageCounter};
+use crate::introspection::Context;
+use crate::introspection::{Introspector, Locator, ManualPageCounter};
 use crate::layout::{Frame, LayoutRoot, PageElem};
 
 /// The root element of a document and its metadata.
@@ -71,7 +72,7 @@ impl LayoutRoot for DocumentElem {
     fn layout_root(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
     ) -> SourceResult<Document> {
         tracing::info!("Document layout");
 
@@ -79,13 +80,14 @@ impl LayoutRoot for DocumentElem {
         let mut page_counter = ManualPageCounter::new();
 
         let children = self.children();
+        let styles = context.styles;
         let mut iter = children.iter().peekable();
+        let mut locator = Locator::new(context.location);
 
         while let Some(mut child) = iter.next() {
-            let outer = styles;
-            let mut styles = styles;
+            let mut styles = context.styles;
             if let Some((elem, local)) = child.to_styled() {
-                styles = outer.chain(local);
+                styles = context.styles.chain(local);
                 child = elem;
             }
 
@@ -96,8 +98,12 @@ impl LayoutRoot for DocumentElem {
                         .to::<PageElem>()?
                         .clear_to(styles)
                 });
-                let fragment =
-                    page.layout(engine, styles, &mut page_counter, extend_to)?;
+                let fragment = page.layout(
+                    engine,
+                    locator.generate(styles, child.span()),
+                    &mut page_counter,
+                    extend_to,
+                )?;
                 pages.extend(fragment);
             } else {
                 bail!(child.span(), "unexpected document child");

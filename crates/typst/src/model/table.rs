@@ -2,8 +2,9 @@ use crate::diag::{At, SourceResult, StrResult};
 use crate::engine::Engine;
 use crate::foundations::{
     elem, Array, CastInfo, Content, FromValue, Func, IntoValue, NativeElement, Reflect,
-    Smart, StyleChain, Value,
+    Smart, Value,
 };
+use crate::introspection::Context;
 use crate::layout::{
     Abs, Align, AlignElem, Axes, Fragment, FrameItem, GridLayouter, Layout, Length,
     Point, Regions, Rel, Sides, Size, TrackSizings,
@@ -160,9 +161,10 @@ impl Layout for TableElem {
     fn layout(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment> {
+        let styles = context.styles;
         let inset = self.inset(styles);
         let align = self.align(styles);
         let columns = self.columns(styles);
@@ -195,7 +197,7 @@ impl Layout for TableElem {
 
         // Prepare grid layout by unifying content and gutter tracks.
         let layouter =
-            GridLayouter::new(tracks, gutter, &cells, regions, styles, self.span());
+            GridLayouter::new(tracks, gutter, &cells, regions, context, self.span());
 
         // Measure the columns and layout the grid row-by-row.
         let mut layout = layouter.layout(engine)?;

@@ -2,9 +2,8 @@ use std::f64::consts::PI;
 
 use crate::diag::{bail, SourceResult};
 use crate::engine::Engine;
-use crate::foundations::{
-    elem, func, scope, Content, NativeElement, Resolve, Smart, StyleChain,
-};
+use crate::foundations::{elem, func, scope, Content, NativeElement, Resolve, Smart};
+use crate::introspection::Context;
 use crate::layout::{
     Axes, Em, Fragment, Frame, FrameItem, Layout, Length, Point, Regions, Rel,
 };
@@ -127,9 +126,10 @@ impl Layout for PolygonElem {
     fn layout(
         &self,
         _: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment> {
+        let styles = context.styles;
         let points: Vec<Point> = self
             .vertices()
             .iter()

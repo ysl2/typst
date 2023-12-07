@@ -6,7 +6,8 @@ use ecow::{eco_format, EcoString};
 
 use crate::diag::{bail, SourceResult};
 use crate::engine::Engine;
-use crate::foundations::{func, repr, scope, ty, Content, Smart, StyleChain};
+use crate::foundations::{func, repr, scope, ty, Content, Smart};
+use crate::introspection::Context;
 use crate::layout::{Abs, Axes, Frame, Layout, Length, Regions, Size};
 use crate::syntax::{Span, Spanned};
 use crate::util::Numeric;
@@ -191,9 +192,9 @@ impl Pattern {
         // Layout the pattern.
         let world = engine.world;
         let library = world.library();
-        let styles = StyleChain::new(&library.styles);
+        let context = Context::root(&library.styles);
         let pod = Regions::one(region, Axes::splat(false));
-        let mut frame = body.layout(engine, styles, pod)?.into_frame();
+        let mut frame = body.layout(engine, context, pod)?.into_frame();
 
         // Set the size of the frame if the size is enforced.
         if let Smart::Custom(size) = size {

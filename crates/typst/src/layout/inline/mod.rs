@@ -13,8 +13,9 @@ use self::shaping::{
 use crate::diag::{bail, SourceResult};
 use crate::engine::{Engine, Route};
 use crate::eval::Tracer;
-use crate::foundations::{Content, Resolve, Smart, StyleChain};
-use crate::introspection::{Introspector, Locator, MetaElem};
+use crate::foundations::{Content, NativeElement, Resolve, Smart, StyleChain};
+use crate::introspection::{Context, Locator};
+use crate::introspection::{Introspector, MetaElem};
 use crate::layout::{
     Abs, AlignElem, Axes, BoxElem, Dir, Em, FixedAlign, Fr, Fragment, Frame, HElem,
     Layout, Point, Regions, Size, Sizing, Spacing,
@@ -32,7 +33,7 @@ use crate::World;
 pub(crate) fn layout_inline(
     children: &[Prehashed<Content>],
     engine: &mut Engine,
-    styles: StyleChain,
+    context: Context,
     consecutive: bool,
     region: Size,
     expand: bool,
@@ -44,19 +45,17 @@ pub(crate) fn layout_inline(
         world: Tracked<dyn World + '_>,
         introspector: Tracked<Introspector>,
         route: Tracked<Route>,
-        locator: Tracked<Locator>,
         tracer: TrackedMut<Tracer>,
-        styles: StyleChain,
+        context: Context,
         consecutive: bool,
         region: Size,
         expand: bool,
     ) -> SourceResult<Fragment> {
-        let mut locator = Locator::chained(locator);
+        let styles = context.styles;
         let mut engine = Engine {
             world,
             introspector,
             route: Route::extend(route),
-            locator: &mut locator,
             tracer,
         };
 
@@ -66,7 +65,7 @@ pub(crate) fn layout_inline(
         // Perform BiDi analysis and then prepare paragraph layout by building a
         // representation on which we can do line breaking without layouting
         // each and every line from scratch.
-        let p = prepare(&mut engine, children, &text, segments, spans, styles, region)?;
+        let p = prepare(&mut engine, children, &text, segments, spans, context, region)?;
 
         // Break the paragraph into lines.
         let lines = linebreak(&engine, &p, region.x - p.hang);
@@ -75,21 +74,17 @@ pub(crate) fn layout_inline(
         finalize(&mut engine, &p, &lines, region, expand)
     }
 
-    let fragment = cached(
+    cached(
         children,
         engine.world,
         engine.introspector,
         engine.route.track(),
-        engine.locator.track(),
         TrackedMut::reborrow_mut(&mut engine.tracer),
-        styles,
+        context,
         consecutive,
         region,
         expand,
-    )?;
-
-    engine.locator.visit_frames(&fragment);
-    Ok(fragment)
+    )
 }
 
 /// Range of a substring of text.
@@ -216,7 +211,7 @@ enum Item<'a> {
     /// Absolute spacing between other items.
     Absolute(Abs),
     /// Fractional spacing between other items.
-    Fractional(Fr, Option<(&'a BoxElem, StyleChain<'a>)>),
+    Fractional(Fr, Option<(&'a BoxElem, Context<'a>)>),
     /// Layouted inline-level content.
     Frame(Frame),
     /// Metadata.
@@ -244,7 +239,7 @@ impl<'a> Item<'a> {
     fn len(&self) -> usize {
         match self {
             Self::Text(shaped) => shaped.text.len(),
-            Self::Absolute(_) | Self::Fractional(_, _) => SPACING_REPLACE.len_utf8(),
+            Self::Absolute(_) | Self::Fractional(..) => SPACING_REPLACE.len_utf8(),
             Self::Frame(_) => OBJ_REPLACE.len_utf8(),
             Self::Meta(_) => 0,
         }
@@ -256,7 +251,7 @@ impl<'a> Item<'a> {
             Self::Text(shaped) => shaped.width,
             Self::Absolute(v) => *v,
             Self::Frame(frame) => frame.width(),
-            Self::Fractional(_, _) | Self::Meta(_) => Abs::zero(),
+            Self::Fractional(..) | Self::Meta(_) => Abs::zero(),
         }
     }
 }
@@ -388,7 +383,7 @@ impl<'a> Line<'a> {
     fn fr(&self) -> Fr {
         self.items()
             .filter_map(|item| match item {
-                Item::Fractional(fr, _) => Some(*fr),
+                Item::Fractional(fr, ..) => Some(*fr),
                 _ => None,
             })
             .sum()
@@ -528,15 +523,17 @@ fn collect<'a>(
 
 /// Prepare paragraph layout by shaping the whole paragraph and layouting all
 /// contained inline-level content.
+#[allow(clippy::too_many_arguments)]
 fn prepare<'a>(
     engine: &mut Engine,
     children: &'a [Prehashed<Content>],
     text: &'a str,
     segments: Vec<(Segment<'a>, StyleChain<'a>)>,
     spans: SpanMapper,
-    styles: StyleChain<'a>,
+    context: Context<'a>,
     region: Size,
 ) -> SourceResult<Preparation<'a>> {
+    let styles = context.styles;
     let dir = TextElem::dir_in(styles);
     let bidi = BidiInfo::new(
         text,
@@ -549,6 +546,7 @@ fn prepare<'a>(
 
     let mut cursor = 0;
     let mut items = Vec::with_capacity(segments.len());
+    let mut locator = Locator::new(context.location);
 
     // Shape / layout the children and collect them into items.
     for (segment, styles) in segments {
@@ -568,16 +566,19 @@ fn prepare<'a>(
             },
             Segment::Equation(equation) => {
                 let pod = Regions::one(region, Axes::splat(false));
-                let mut frame = equation.layout(engine, styles, pod)?.into_frame();
+                let mut frame = equation
+                    .layout(engine, locator.generate(styles, equation.span()), pod)?
+                    .into_frame();
                 frame.translate(Point::with_y(TextElem::baseline_in(styles)));
                 items.push(Item::Frame(frame));
             }
             Segment::Box(elem, _) => {
+                let context = locator.generate(styles, elem.span());
                 if let Sizing::Fr(v) = elem.width(styles) {
-                    items.push(Item::Fractional(v, Some((elem, styles))));
+                    items.push(Item::Fractional(v, Some((elem, context))));
                 } else {
                     let pod = Regions::one(region, Axes::splat(false));
-                    let mut frame = elem.layout(engine, styles, pod)?.into_frame();
+                    let mut frame = elem.layout(engine, context, pod)?.into_frame();
                     frame.translate(Point::with_y(TextElem::baseline_in(styles)));
                     items.push(Item::Frame(frame));
                 }
@@ -1298,11 +1299,12 @@ fn commit(
             }
             Item::Fractional(v, elem) => {
                 let amount = v.share(fr, remaining);
-                if let Some((elem, styles)) = elem {
+                if let Some((elem, context)) = elem {
                     let region = Size::new(amount, full);
                     let pod = Regions::one(region, Axes::new(true, false));
-                    let mut frame = elem.layout(engine, *styles, pod)?.into_frame();
-                    frame.translate(Point::with_y(TextElem::baseline_in(*styles)));
+                    let mut frame =
+                        elem.layout(engine, context.clone(), pod)?.into_frame();
+                    frame.translate(Point::with_y(TextElem::baseline_in(context.styles)));
                     push(&mut offset, frame);
                 } else {
                     offset += amount;

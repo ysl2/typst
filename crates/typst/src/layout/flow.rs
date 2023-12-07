@@ -3,13 +3,15 @@ use comemo::Prehashed;
 use crate::diag::{bail, SourceResult};
 use crate::engine::Engine;
 use crate::foundations::{elem, Content, NativeElement, Resolve, Smart, StyleChain};
-use crate::introspection::{Meta, MetaElem};
+use crate::introspection::Context;
+use crate::introspection::{Locator, Meta, MetaElem};
 use crate::layout::{
     Abs, AlignElem, Axes, BlockElem, ColbreakElem, ColumnsElem, FixedAlign, Fr, Fragment,
     Frame, FrameItem, Layout, PlaceElem, Point, Regions, Rel, Size, Spacing, VAlign,
     VElem,
 };
 use crate::model::{FootnoteElem, FootnoteEntry, ParElem};
+use crate::syntax::Span;
 use crate::util::Numeric;
 use crate::visualize::{
     CircleElem, EllipseElem, ImageElem, LineElem, PathElem, PolygonElem, RectElem,
@@ -32,7 +34,7 @@ impl Layout for FlowElem {
     fn layout(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment> {
         if !regions.size.x.is_finite() && regions.expand.x {
@@ -41,11 +43,12 @@ impl Layout for FlowElem {
         if !regions.size.y.is_finite() && regions.expand.y {
             bail!(self.span(), "cannot expand into infinite height");
         }
-        let mut layouter = FlowLayouter::new(regions, styles);
+
+        let outer = context.styles;
+        let mut layouter = FlowLayouter::new(regions, context);
 
         for mut child in self.children().iter().map(|c| &**c) {
-            let outer = styles;
-            let mut styles = styles;
+            let mut styles = outer;
             if let Some((elem, map)) = child.to_styled() {
                 child = elem;
                 styles = outer.chain(map);
@@ -65,7 +68,7 @@ impl Layout for FlowElem {
                 || child.is::<PathElem>()
             {
                 let layoutable = child.with::<dyn Layout>().unwrap();
-                layouter.layout_single(engine, layoutable, styles)?;
+                layouter.layout_single(engine, layoutable, child.span(), styles)?;
             } else if child.is::<MetaElem>() {
                 let mut frame = Frame::soft(Size::zero());
                 frame.meta(styles, true);
@@ -101,6 +104,8 @@ struct FlowLayouter<'a> {
     regions: Regions<'a>,
     /// The shared styles.
     styles: StyleChain<'a>,
+    /// The inherited context.
+    locator: Locator,
     /// Whether the flow should expand to fill the region.
     expand: Axes<bool>,
     /// The initial size of `regions.size` that was available before we started
@@ -164,7 +169,8 @@ impl FlowItem {
 
 impl<'a> FlowLayouter<'a> {
     /// Create a new flow layouter.
-    fn new(mut regions: Regions<'a>, styles: StyleChain<'a>) -> Self {
+    fn new(mut regions: Regions<'a>, context: Context<'a>) -> Self {
+        let styles = context.styles;
         let expand = regions.expand;
 
         // Disable vertical expansion & root for children.
@@ -175,6 +181,7 @@ impl<'a> FlowLayouter<'a> {
             root,
             regions,
             styles,
+            locator: Locator::new(context.location),
             expand,
             initial: regions.size,
             last_was_par: false,
@@ -224,7 +231,7 @@ impl<'a> FlowLayouter<'a> {
         let lines = par
             .layout(
                 engine,
-                styles,
+                self.locator.generate(styles, par.span()),
                 consecutive,
                 self.regions.base(),
                 self.regions.expand.x,
@@ -271,12 +278,15 @@ impl<'a> FlowLayouter<'a> {
         &mut self,
         engine: &mut Engine,
         content: &dyn Layout,
+        span: Span,
         styles: StyleChain,
     ) -> SourceResult<()> {
         let align = AlignElem::alignment_in(styles).resolve(styles);
         let sticky = BlockElem::sticky_in(styles);
         let pod = Regions::one(self.regions.base(), Axes::splat(false));
-        let frame = content.layout(engine, styles, pod)?.into_frame();
+        let frame = content
+            .layout(engine, self.locator.generate(styles, span), pod)?
+            .into_frame();
         self.layout_item(
             engine,
             FlowItem::Frame { frame, align, sticky, movable: true },
@@ -300,7 +310,9 @@ impl<'a> FlowLayouter<'a> {
             align.x().unwrap_or_default().resolve(styles)
         });
         let y_align = alignment.map(|align| align.y().map(VAlign::fix));
-        let frame = placed.layout(engine, styles, self.regions)?.into_frame();
+        let frame = placed
+            .layout(engine, self.locator.generate(styles, placed.span()), self.regions)?
+            .into_frame();
         let item = FlowItem::Placed { frame, x_align, y_align, delta, float, clearance };
         self.layout_item(engine, item)
     }
@@ -338,7 +350,11 @@ impl<'a> FlowLayouter<'a> {
 
         // Layout the block itself.
         let sticky = BlockElem::sticky_in(styles);
-        let fragment = block.layout(engine, styles, self.regions)?;
+        let fragment = block.layout(
+            engine,
+            self.locator.generate(styles, block.span()),
+            self.regions,
+        )?;
 
         for (i, frame) in fragment.into_iter().enumerate() {
             // Find footnotes in the frame.
@@ -642,10 +658,15 @@ impl FlowLayouter<'_> {
             }
 
             self.regions.size.y -= self.footnote_config.gap;
-            let checkpoint = engine.locator.clone();
+
+            let checkpoint = self.locator.clone();
             let frames = FootnoteEntry::new(notes[k].clone())
                 .pack()
-                .layout(engine, self.styles, self.regions.with_root(false))?
+                .layout(
+                    engine,
+                    self.locator.generate(self.styles, notes[k].span()),
+                    self.regions.with_root(false),
+                )?
                 .into_frames();
 
             // If the entries didn't fit, abort (to keep footnote and entry
@@ -664,7 +685,7 @@ impl FlowLayouter<'_> {
                 }
 
                 // Undo locator modifications.
-                *engine.locator = checkpoint;
+                self.locator = checkpoint;
 
                 return Ok(false);
             }
@@ -701,7 +722,10 @@ impl FlowLayouter<'_> {
         let pod = Regions::one(self.regions.base(), expand);
         let separator = &self.footnote_config.separator;
 
-        let mut frame = separator.layout(engine, self.styles, pod)?.into_frame();
+        let mut frame = separator
+            .layout(engine, self.locator.generate(self.styles, separator.span()), pod)?
+            .into_frame();
+
         frame.size_mut().y += self.footnote_config.clearance;
         frame.translate(Point::with_y(self.footnote_config.clearance));
 

@@ -17,8 +17,8 @@ use crate::diag::{bail, At, SourceResult, StrResult};
 use crate::engine::Engine;
 use crate::foundations::{
     cast, elem, func, scope, Bytes, Cast, Content, NativeElement, Resolve, Smart,
-    StyleChain,
 };
+use crate::introspection::Context;
 use crate::layout::{
     Abs, Axes, FixedAlign, Fragment, Frame, FrameItem, Layout, Length, Point, Regions,
     Rel, Size,
@@ -147,11 +147,12 @@ impl Layout for ImageElem {
     fn layout(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment> {
         // Take the format that was explicitly defined, or parse the extension,
         // or try to detect the format.
+        let styles = context.styles;
         let data = self.data();
         let format = match self.format(styles) {
             Smart::Custom(v) => v,

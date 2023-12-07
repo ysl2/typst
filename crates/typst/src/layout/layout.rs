@@ -1,6 +1,7 @@
 use crate::diag::SourceResult;
 use crate::engine::Engine;
-use crate::foundations::{dict, elem, func, Content, Func, NativeElement, StyleChain};
+use crate::foundations::{dict, elem, func, Content, Func, NativeElement};
+use crate::introspection::Context;
 use crate::layout::{Fragment, Layout, Regions, Size};
 
 /// Provides access to the current outer container's (or page's, if none) size
@@ -70,7 +71,7 @@ impl Layout for LayoutElem {
     fn layout(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment> {
         // Gets the current region's base size, which will be the size of the
@@ -80,6 +81,6 @@ impl Layout for LayoutElem {
             .func()
             .call(engine, [dict! { "width" => x, "height" => y }])?
             .display();
-        result.layout(engine, styles, regions)
+        result.layout(engine, context, regions)
     }
 }

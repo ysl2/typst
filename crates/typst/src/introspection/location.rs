@@ -1,3 +1,4 @@
+use std::hash::Hash;
 use std::num::NonZeroUsize;
 
 use ecow::EcoString;
@@ -15,23 +16,17 @@ use crate::model::Numbering;
 /// content.
 #[ty(scope)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-pub struct Location {
-    /// The hash of the element.
-    pub hash: u128,
-    /// An unique number among elements with the same hash. This is the reason
-    /// we need a `Locator` everywhere.
-    pub disambiguator: usize,
-    /// A synthetic location created from another one. This is used for example
-    /// in bibliography management to create individual linkable locations for
-    /// reference entries from the bibliography's location.
-    pub variant: usize,
-}
+pub struct Location(pub(super) u128);
 
 impl Location {
+    /// Create the initial location at the root of the hierarchy.
+    pub fn root() -> Self {
+        Location(0)
+    }
+
     /// Produce a variant of this location.
-    pub fn variant(mut self, n: usize) -> Self {
-        self.variant = n;
-        self
+    pub fn variant(self, n: usize) -> Self {
+        Self(crate::util::hash128(&(self, n)))
     }
 }
 

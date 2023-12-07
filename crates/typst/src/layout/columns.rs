@@ -3,6 +3,7 @@ use std::num::NonZeroUsize;
 use crate::diag::SourceResult;
 use crate::engine::Engine;
 use crate::foundations::{elem, Behave, Behaviour, Content, StyleChain};
+use crate::introspection::Context;
 use crate::layout::{
     Abs, Axes, Dir, Fragment, Frame, Layout, Length, Point, Ratio, Regions, Rel, Size,
 };
@@ -62,15 +63,16 @@ impl Layout for ColumnsElem {
     fn layout(
         &self,
         engine: &mut Engine,
-        styles: StyleChain,
+        context: Context,
         regions: Regions,
     ) -> SourceResult<Fragment> {
+        let styles = context.styles;
         let body = self.body();
 
         // Separating the infinite space into infinite columns does not make
         // much sense.
         if !regions.size.x.is_finite() {
-            return body.layout(engine, styles, regions);
+            return body.layout(engine, context, regions);
         }
 
         // Determine the width of the gutter and each column.
@@ -95,7 +97,7 @@ impl Layout for ColumnsElem {
         };
 
         // Layout the children.
-        let mut frames = body.layout(engine, styles, pod)?.into_iter();
+        let mut frames = body.layout(engine, context, pod)?.into_iter();
         let mut finished = vec![];
 
         let dir = TextElem::dir_in(styles);
