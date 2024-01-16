@@ -601,6 +601,7 @@ fn embedded_code_expr(p: &mut Parser) {
         SyntaxKind::Let
             | SyntaxKind::Set
             | SyntaxKind::Show
+            | SyntaxKind::Revoke
             | SyntaxKind::Import
             | SyntaxKind::Include
             | SyntaxKind::Return
@@ -725,6 +726,7 @@ fn code_primary(p: &mut Parser, atomic: bool, allow_destructuring: bool) {
         SyntaxKind::Let => let_binding(p),
         SyntaxKind::Set => set_rule(p),
         SyntaxKind::Show => show_rule(p),
+        SyntaxKind::Revoke => revoke_rule(p),
         SyntaxKind::If => conditional(p),
         SyntaxKind::While => while_loop(p),
         SyntaxKind::For => for_loop(p),
@@ -1071,6 +1073,13 @@ fn show_rule(p: &mut Parser) {
     }
 
     p.wrap(m, SyntaxKind::ShowRule);
+}
+
+fn revoke_rule(p: &mut Parser) {
+    let m = p.marker();
+    p.assert(SyntaxKind::Revoke);
+    code_expr(p);
+    p.wrap(m, SyntaxKind::RevokeRule);
 }
 
 fn conditional(p: &mut Parser) {

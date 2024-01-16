@@ -159,6 +159,8 @@ pub enum SyntaxKind {
     Set,
     /// The `show` keyword.
     Show,
+    /// The `revoke` keyword.
+    Revoke,
     /// The `if` keyword.
     If,
     /// The `else` keyword.
@@ -232,6 +234,8 @@ pub enum SyntaxKind {
     SetRule,
     /// A show rule: `show heading: it => emph(it.body)`.
     ShowRule,
+    /// A revoke rule: `revoke heading`.
+    RevokeRule,
     /// An if-else conditional: `if x { y } else { z }`.
     Conditional,
     /// A while loop: `while x { y }`.
@@ -426,6 +430,7 @@ impl SyntaxKind {
             Self::Let => "keyword `let`",
             Self::Set => "keyword `set`",
             Self::Show => "keyword `show`",
+            Self::Revoke => "keyword `revoke`",
             Self::If => "keyword `if`",
             Self::Else => "keyword `else`",
             Self::For => "keyword `for`",
@@ -462,6 +467,7 @@ impl SyntaxKind {
             Self::LetBinding => "`let` expression",
             Self::SetRule => "`set` expression",
             Self::ShowRule => "`show` expression",
+            Self::RevokeRule => "`revoke` expression",
             Self::Conditional => "`if` expression",
             Self::WhileLoop => "while-loop expression",
             Self::ForLoop => "for-loop expression",

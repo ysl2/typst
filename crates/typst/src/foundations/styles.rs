@@ -129,6 +129,9 @@ impl Styles {
         self.0.iter().find_map(|entry| match &**entry {
             Style::Property(property) => property.is_of(elem).then_some(property.span),
             Style::Recipe(recipe) => recipe.is_of(elem).then_some(Some(recipe.span)),
+            Style::Revocation(revocation) => {
+                revocation.is_of(elem).then_some(Some(revocation.span))
+            }
         })
     }
 
@@ -169,6 +172,8 @@ pub enum Style {
     Property(Property),
     /// A show rule recipe.
     Recipe(Recipe),
+    /// A revoke rule.
+    Revocation(Revocation),
 }
 
 impl Style {
@@ -187,6 +192,14 @@ impl Style {
             _ => None,
         }
     }
+
+    /// If this is a revocation, return it.
+    pub fn revocation(&self) -> Option<&Revocation> {
+        match self {
+            Self::Revocation(revocation) => Some(revocation),
+            _ => None,
+        }
+    }
 }
 
 impl Debug for Style {
@@ -194,6 +207,7 @@ impl Debug for Style {
         match self {
             Self::Property(property) => property.fmt(f),
             Self::Recipe(recipe) => recipe.fmt(f),
+            Self::Revocation(revocation) => revocation.fmt(f),
         }
     }
 }
@@ -207,6 +221,12 @@ impl From<Property> for Style {
 impl From<Recipe> for Style {
     fn from(recipe: Recipe) -> Self {
         Self::Recipe(recipe)
+    }
+}
+
+impl From<Revocation> for Style {
+    fn from(revocation: Revocation) -> Self {
+        Self::Revocation(revocation)
     }
 }
 
@@ -419,6 +439,33 @@ cast! {
     func: Func => Self::Func(func),
 }
 
+/// A rule revoke.
+#[derive(Clone, PartialEq, Hash)]
+pub struct Revocation {
+    /// The span errors are reported with.
+    pub span: Span,
+    /// Determines which elements the rule applies to.
+    pub selector: Selector,
+}
+
+impl Revocation {
+    /// Whether this revocation is for the given type of element.
+    pub fn is_of(&self, element: Element) -> bool {
+        match self.selector {
+            Selector::Elem(own, _) => own == element,
+            _ => false,
+        }
+    }
+}
+
+impl Debug for Revocation {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "Revoke(",)?;
+        self.selector.fmt(f)?;
+        write!(f, ")")
+    }
+}
+
 /// A chain of styles, similar to a linked list.
 ///
 /// A style chain allows to combine properties from multiple style lists in a
@@ -541,7 +588,22 @@ impl<'a> StyleChain<'a> {
 
     /// Iterate over all style recipes in the chain.
     pub fn recipes(self) -> impl Iterator<Item = &'a Recipe> {
-        self.entries().filter_map(Style::recipe)
+        let mut revoked = SmallVec::<[&'a Selector; 4]>::new();
+        self.entries().filter_map(move |entry| match entry {
+            Style::Property(_) => None,
+            Style::Recipe(recipe) => {
+                if let Some(sel) = &recipe.selector {
+                    if revoked.iter().any(|r| r.includes(sel)) {
+                        return None;
+                    }
+                }
+                Some(recipe)
+            }
+            Style::Revocation(revocation) => {
+                revoked.push(&revocation.selector);
+                None
+            }
+        })
     }
 
     /// Iterate over all values for the given property in the chain.

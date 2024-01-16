@@ -8,7 +8,8 @@ your choice to your document. With _set rules,_ you can configure basic
 properties of elements. This way, you create most common styles. However, there
 might not be a built-in property for everything you wish to do. For this reason,
 Typst further supports _show rules_ that can completely redefine the appearance
-of elements.
+of elements. _Revoke rules_ are the counterpart to show rules and can be used to
+disable specific show rules.
 
 ## Set rules
 With set rules, you can customize the appearance of elements. They are written
@@ -142,3 +143,40 @@ We started Project in 2019
 and are still working on it.
 Project is progressing badly.
 ```
+
+## Revoke rules
+Sometimes you need to undo the effect of an existing show rule. This is
+possible through _revoke rules._ Like a show rule, a revoke rule takes a
+selector. It then disables all previous show rules for that selector for the
+remainder of the scope.
+
+Let's say you want all your links styled blue, except for a few ones. You could
+realize this by globally styling links and then creating a `plain` function
+that locally revokes this styling on all content given to it.
+
+```example
+#show link: set text(blue)
+#let plain(body) = {
+  revoke link
+  body
+}
+
+https://example.com \
+#plain[https://unstyled.org]
+```
+
+A show rule is affected by a revocation if the revoked selector is equivalent or
+more general than the show rule's selector. For example, a `{revoke raw}` rule
+also revokes show rules on `{raw.where(block: false)}`. Similarly
+`{revoke text}` revokes all text and regex show rules. Like set rules, revoke
+rules can be combined with show rules into show-revoke rules.
+
+````example
+#show "hi!": "👋"
+#show raw: revoke text
+
+hey there! hi!
+```rust
+hi!("there");
+```
+````

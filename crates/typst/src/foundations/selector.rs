@@ -7,7 +7,7 @@ use smallvec::SmallVec;
 use crate::diag::{bail, StrResult};
 use crate::foundations::{
     cast, func, repr, scope, ty, CastInfo, Content, Dict, Element, FromValue, Func,
-    Label, Reflect, Regex, Repr, Str, Type, Value,
+    Label, NativeElement, Reflect, Regex, Repr, Str, Type, Value,
 };
 use crate::introspection::{Locatable, Location};
 use crate::symbols::Symbol;
@@ -149,6 +149,18 @@ impl Selector {
             // Not supported here.
             Self::Before { .. } | Self::After { .. } => false,
         }
+    }
+
+    /// Whether this selector matches the same or a superset of the elements
+    /// `other` matches.
+    pub fn includes(&self, other: &Self) -> bool {
+        self == other
+            || match (self, other) {
+                // x is more general that x.where(..)
+                (Self::Elem(a, None), Self::Elem(b, _)) => a == b,
+                (Self::Elem(a, None), Self::Regex(_)) => *a == TextElem::elem(),
+                _ => false,
+            }
     }
 }
 

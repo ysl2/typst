@@ -34,7 +34,7 @@ fn eval_markup<'a>(
                     break;
                 }
 
-                seq.push(eval_markup(vm, exprs)?.styled_with_map(styles))
+                seq.push(eval_markup(vm, exprs)?.styled_with_map(styles));
             }
             ast::Expr::Show(show) => {
                 let recipe = show.eval(vm)?;
@@ -43,7 +43,16 @@ fn eval_markup<'a>(
                 }
 
                 let tail = eval_markup(vm, exprs)?;
-                seq.push(tail.styled_with_recipe(&mut vm.engine, recipe)?)
+                seq.push(tail.styled_with_recipe(&mut vm.engine, recipe)?);
+            }
+            ast::Expr::Revoke(revoke) => {
+                let revocation = revoke.eval(vm)?;
+                if vm.flow.is_some() {
+                    break;
+                }
+
+                let tail = eval_markup(vm, exprs)?;
+                seq.push(tail.styled(revocation));
             }
             expr => match expr.eval(vm)? {
                 Value::Label(label) => {

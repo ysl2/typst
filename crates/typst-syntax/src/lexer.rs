@@ -613,6 +613,7 @@ fn keyword(ident: &str) -> Option<SyntaxKind> {
         "let" => SyntaxKind::Let,
         "set" => SyntaxKind::Set,
         "show" => SyntaxKind::Show,
+        "revoke" => SyntaxKind::Revoke,
         "if" => SyntaxKind::If,
         "else" => SyntaxKind::Else,
         "for" => SyntaxKind::For,

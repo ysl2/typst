@@ -187,6 +187,8 @@ pub enum Expr<'a> {
     Set(SetRule<'a>),
     /// A show rule: `show heading: it => emph(it.body)`.
     Show(ShowRule<'a>),
+    /// A revoke rule: `revoke heading`.
+    Revoke(RevokeRule<'a>),
     /// An if-else conditional: `if x { y } else { z }`.
     Conditional(Conditional<'a>),
     /// A while loop: `while x { y }`.
@@ -264,6 +266,7 @@ impl<'a> AstNode<'a> for Expr<'a> {
             SyntaxKind::DestructAssignment => node.cast().map(Self::DestructAssign),
             SyntaxKind::SetRule => node.cast().map(Self::Set),
             SyntaxKind::ShowRule => node.cast().map(Self::Show),
+            SyntaxKind::RevokeRule => node.cast().map(Self::Revoke),
             SyntaxKind::Conditional => node.cast().map(Self::Conditional),
             SyntaxKind::WhileLoop => node.cast().map(Self::While),
             SyntaxKind::ForLoop => node.cast().map(Self::For),
@@ -326,6 +329,7 @@ impl<'a> AstNode<'a> for Expr<'a> {
             Self::DestructAssign(v) => v.to_untyped(),
             Self::Set(v) => v.to_untyped(),
             Self::Show(v) => v.to_untyped(),
+            Self::Revoke(v) => v.to_untyped(),
             Self::Conditional(v) => v.to_untyped(),
             Self::While(v) => v.to_untyped(),
             Self::For(v) => v.to_untyped(),
@@ -361,6 +365,7 @@ impl Expr<'_> {
                 | Self::Let(_)
                 | Self::Set(_)
                 | Self::Show(_)
+                | Self::Revoke(_)
                 | Self::Conditional(_)
                 | Self::While(_)
                 | Self::For(_)
@@ -1897,7 +1902,7 @@ node! {
 }
 
 impl<'a> ShowRule<'a> {
-    /// Defines which nodes the show rule applies to.
+    /// Defines which elements the show rule applies to.
     pub fn selector(self) -> Option<Expr<'a>> {
         self.0
             .children()
@@ -1909,6 +1914,18 @@ impl<'a> ShowRule<'a> {
     /// The transformation recipe.
     pub fn transform(self) -> Expr<'a> {
         self.0.cast_last_match().unwrap_or_default()
+    }
+}
+
+node! {
+    /// A revoke rule: `revoke heading`.
+    RevokeRule
+}
+
+impl<'a> RevokeRule<'a> {
+    /// Defines which rules to revoke.
+    pub fn selector(self) -> Expr<'a> {
+        self.0.cast_first_match().unwrap_or_default()
     }
 }
 

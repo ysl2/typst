@@ -42,6 +42,15 @@ fn eval_code<'a>(
                 let tail = eval_code(vm, exprs)?.display();
                 Value::Content(tail.styled_with_recipe(&mut vm.engine, recipe)?)
             }
+            ast::Expr::Revoke(revoke) => {
+                let revocation = revoke.eval(vm)?;
+                if vm.flow.is_some() {
+                    break;
+                }
+
+                let tail = eval_code(vm, exprs)?.display();
+                Value::Content(tail.styled(revocation))
+            }
             _ => expr.eval(vm)?,
         };
 
@@ -117,6 +126,7 @@ impl Eval for ast::Expr<'_> {
             Self::DestructAssign(v) => v.eval(vm),
             Self::Set(_) => bail!(forbidden("set")),
             Self::Show(_) => bail!(forbidden("show")),
+            Self::Revoke(_) => bail!(forbidden("revoke")),
             Self::Conditional(v) => v.eval(vm),
             Self::While(v) => v.eval(vm),
             Self::For(v) => v.eval(vm),
