@@ -17,6 +17,7 @@ use crate::layout::{
     Alignment, BlockElem, Em, HAlignment, Length, PlaceElem, VAlignment, VElem,
 };
 use crate::model::{Numbering, NumberingPattern, Outlinable, Refable, Supplement};
+use crate::realize::preprocess;
 use crate::syntax::Spanned;
 use crate::text::{Lang, Region, TextElem};
 use crate::util::NonZeroExt;
@@ -285,6 +286,7 @@ impl Synthesize for Packed<FigureElem> {
         // Fill the figure's caption.
         let mut caption = elem.caption(styles);
         if let Some(caption) = &mut caption {
+            preprocess(engine, caption.pack_mut(), styles)?;
             caption.push_kind(kind.clone());
             caption.push_supplement(supplement.clone());
             caption.push_numbering(numbering.clone());
@@ -388,10 +390,12 @@ impl Outlinable for Packed<FigureElem> {
 
         let mut realized = caption.body().clone();
         if let (
+            Smart::Custom(separator),
             Smart::Custom(Some(Supplement::Content(mut supplement))),
             Some(Some(counter)),
             Some(numbering),
         ) = (
+            caption.separator(StyleChain::default()),
             (**self).supplement(StyleChain::default()).clone(),
             (**self).counter(),
             self.numbering(),
@@ -402,8 +406,6 @@ impl Outlinable for Packed<FigureElem> {
             if !supplement.is_empty() {
                 supplement += TextElem::packed('\u{a0}');
             }
-
-            let separator = caption.get_separator(StyleChain::default());
 
             realized = supplement + numbers + separator + caption.body();
         }
@@ -429,7 +431,7 @@ impl Outlinable for Packed<FigureElem> {
 ///   caption: [A rectangle],
 /// )
 /// ```
-#[elem(name = "caption", Show)]
+#[elem(name = "caption", Show, Synthesize)]
 pub struct FigureCaption {
     /// The caption's position in the figure. Either `{top}` or `{bottom}`.
     ///
@@ -535,14 +537,18 @@ impl FigureCaption {
             Lang::ENGLISH | _ => ": ",
         }
     }
+}
 
-    fn get_separator(&self, styles: StyleChain) -> Content {
-        self.separator(styles).unwrap_or_else(|| {
-            TextElem::packed(Self::local_separator(
+impl Synthesize for Packed<FigureCaption> {
+    fn synthesize(&mut self, _: &mut Engine, styles: StyleChain) -> SourceResult<()> {
+        let separator = self.separator(styles).unwrap_or_else(|| {
+            TextElem::packed(FigureCaption::local_separator(
                 TextElem::lang_in(styles),
                 TextElem::region_in(styles),
             ))
-        })
+        });
+        self.push_separator(Smart::Custom(separator));
+        Ok(())
     }
 }
 
@@ -552,11 +558,13 @@ impl Show for Packed<FigureCaption> {
         let mut realized = self.body().clone();
 
         if let (
+            Smart::Custom(separator),
             Some(Some(mut supplement)),
             Some(Some(numbering)),
             Some(Some(counter)),
             Some(Some(location)),
         ) = (
+            self.separator(styles),
             self.supplement().cloned(),
             self.numbering(),
             self.counter(),
@@ -566,7 +574,7 @@ impl Show for Packed<FigureCaption> {
             if !supplement.is_empty() {
                 supplement += TextElem::packed('\u{a0}');
             }
-            realized = supplement + numbers + self.get_separator(styles) + realized;
+            realized = supplement + numbers + separator + realized;
         }
 
         Ok(realized)

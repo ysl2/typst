@@ -90,6 +90,10 @@ pub fn realize(
     let mut meta = None;
     if !prepared {
         meta = prepare(engine, &mut target, &mut map, styles)?;
+
+        // Ensure that this preparation only runs once by marking the element as
+        // prepared.
+        target.mark_prepared();
     }
 
     // Apply the step.
@@ -113,6 +117,23 @@ pub fn realize(
     }
 
     Ok(Some(output.styled_with_map(map)))
+}
+
+/// Do preparation-like preprocessing on an element without actually marking it
+/// as prepared. This is useful for materializing an element in its parent
+/// context, e.g. to make `figure.caption` fields available in `figure` show
+/// rules.
+pub fn preprocess(
+    engine: &mut Engine,
+    target: &mut Content,
+    styles: StyleChain,
+) -> SourceResult<()> {
+    let Some(Verdict { prepared: false, mut map, .. }) = verdict(engine, target, styles)
+    else {
+        return Ok(());
+    };
+    prepare(engine, target, &mut map, styles)?;
+    Ok(())
 }
 
 /// What to do with an element when encountering it during realization.
@@ -250,10 +271,6 @@ fn prepare(
     // Copy style chain fields into the element itself, so that they are
     // available in rules.
     target.materialize(styles.chain(map));
-
-    // Ensure that this preparation only runs once by marking the element as
-    // prepared.
-    target.mark_prepared();
 
     // Apply metadata be able to find the element in the frames.
     // Do this after synthesis, so that it includes the synthesized fields.
