@@ -19,7 +19,6 @@ use typst::visualize::{
     Color, DashPattern, FixedStroke, Geometry, Gradient, Image, ImageKind, LineCap,
     LineJoin, Paint, Path, PathItem, Pattern, RasterFormat, RelativeTo, Shape,
 };
-use usvg::TreeParsing;
 
 /// Export a frame into a raster image.
 ///
@@ -272,9 +271,9 @@ fn render_svg_glyph(
 
     // Parse SVG.
     let opts = usvg::Options::default();
-    let mut tree = usvg::Tree::from_xmltree(&document, &opts).ok()?;
-    tree.calculate_bounding_boxes();
-    let view_box = tree.view_box.rect;
+    let fontdb = usvg::fontdb::Database::new();
+    let tree = usvg::Tree::from_xmltree(&document, &opts, &fontdb).ok()?;
+    let view_box = tree.view_box().rect;
 
     // If there's no viewbox defined, use the em square for our scale
     // transformation ...
@@ -297,16 +296,13 @@ fn render_svg_glyph(
     // Compute the space we need to draw our glyph.
     // See https://github.com/RazrFalcon/resvg/issues/602 for why
     // using the svg size is problematic here.
-    let mut bbox = usvg::BBox::default();
-    if let Some(tree_bbox) = tree.root.bounding_box {
-        bbox = bbox.expand(tree_bbox);
-    }
+    let bbox = tree.root().bounding_box();
 
     // Compute the bbox after the transform is applied.
     // We add a nice 5px border along the bounding box to
     // be on the safe size. We also compute the intersection
     // with the canvas rectangle
-    let bbox = bbox.transform(ts)?.to_rect()?.round_out()?;
+    let bbox = bbox.transform(ts)?.round_out()?;
     let bbox = IntRect::from_xywh(
         bbox.left() - 5,
         bbox.y() - 5,
@@ -753,15 +749,14 @@ fn scaled_texture(image: &Image, w: u32, h: u32) -> Option<Arc<sk::Pixmap>> {
         }
         // Safety: We do not keep any references to tree nodes beyond the scope
         // of `with`.
-        ImageKind::Svg(svg) => unsafe {
-            svg.with(|tree| {
-                let ts = tiny_skia::Transform::from_scale(
-                    w as f32 / tree.size.width(),
-                    h as f32 / tree.size.height(),
-                );
-                resvg::render(tree, ts, &mut pixmap.as_mut())
-            });
-        },
+        ImageKind::Svg(svg) => {
+            let tree = svg.tree();
+            let ts = tiny_skia::Transform::from_scale(
+                w as f32 / tree.size().width(),
+                h as f32 / tree.size().height(),
+            );
+            resvg::render(tree, ts, &mut pixmap.as_mut())
+        }
     }
     Some(Arc::new(pixmap))
 }

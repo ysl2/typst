@@ -5,7 +5,7 @@ use std::sync::Arc;
 use comemo::Tracked;
 use ecow::EcoString;
 use siphasher::sip128::Hasher128;
-use usvg::{Node, PostProcessingSteps, TreeParsing, TreePostProc};
+use usvg::Node;
 
 use crate::diag::{format_xml_like_error, StrResult};
 use crate::foundations::Bytes;
@@ -22,7 +22,7 @@ struct Repr {
     data: Bytes,
     size: Axes<f64>,
     font_hash: u128,
-    tree: sync::SyncTree,
+    tree: usvg::Tree,
 }
 
 impl SvgImage {
@@ -30,14 +30,10 @@ impl SvgImage {
     #[comemo::memoize]
     pub fn new(data: Bytes) -> StrResult<SvgImage> {
         let opts = usvg::Options::default();
-        let tree = usvg::Tree::from_data(&data, &opts).map_err(format_usvg_error)?;
-        Ok(Self(Arc::new(Repr {
-            data,
-            size: tree_size(&tree),
-            font_hash: 0,
-            // Safety: We just created the tree and hold the only reference.
-            tree: unsafe { sync::SyncTree::new(tree) },
-        })))
+        let fontdb = fontdb::Database::new();
+        let tree =
+            usvg::Tree::from_data(&data, &opts, &fontdb).map_err(format_usvg_error)?;
+        Ok(Self(Arc::new(Repr { data, size: tree_size(&tree), font_hash: 0, tree })))
     }
 
     /// Decode an SVG image with access to fonts.
@@ -53,21 +49,22 @@ impl SvgImage {
         // fallback family. This way, we can memoize SVG decoding with and without
         // fonts if the SVG does not contain text.
         let opts = usvg::Options { font_family: String::new(), ..Default::default() };
-        let mut tree = usvg::Tree::from_data(&data, &opts).map_err(format_usvg_error)?;
+
+        let empty = fontdb::Database::new();
+        let mut tree =
+            usvg::Tree::from_data(&data, &opts, &empty).map_err(format_usvg_error)?;
+
         let mut font_hash = 0;
         if tree.has_text_nodes() {
-            let (fontdb, hash) = load_svg_fonts(world, &mut tree, families);
-            tree.postprocess(PostProcessingSteps::default(), &fontdb);
+            println!("Tree: {tree:#?}");
+
+            let (fontdb, hash) = load_svg_fonts(world, &tree, families);
+            tree = usvg::Tree::from_data(&data, &opts, &fontdb)
+                .map_err(format_usvg_error)?;
             font_hash = hash;
         }
-        tree.calculate_bounding_boxes();
-        Ok(Self(Arc::new(Repr {
-            data,
-            size: tree_size(&tree),
-            font_hash,
-            // Safety: We just created the tree and hold the only reference.
-            tree: unsafe { sync::SyncTree::new(tree) },
-        })))
+
+        Ok(Self(Arc::new(Repr { data, size: tree_size(&tree), font_hash, tree })))
     }
 
     /// The raw image data.
@@ -85,34 +82,9 @@ impl SvgImage {
         self.0.size.y
     }
 
-    /// Performs an operation with the usvg tree.
-    ///
-    /// This makes the tree uniquely available to the current thread and blocks
-    /// other accesses to it.
-    ///
-    /// # Safety
-    /// The caller may not hold any references to `Rc`s contained in the usvg
-    /// Tree after `f` returns.
-    ///
-    /// # Why is it unsafe?
-    /// Sadly, usvg's Tree is neither `Sync` nor `Send` because it uses `Rc`
-    /// internally and sending a tree to another thread could result in data
-    /// races when an `Rc`'s ref-count is modified from two threads at the same
-    /// time.
-    ///
-    /// However, access to the tree is actually safe if we don't clone `Rc`s /
-    /// only clone them while holding a mutex and drop all clones before the
-    /// mutex is released. Sadly, we can't enforce this variant at the type
-    /// system level. Therefore, access is guarded by this function (which makes
-    /// it reasonable hard to keep references around) and its usage still
-    /// remains `unsafe` (because it's still possible to have `Rc`s escape).
-    ///
-    /// See also: <https://github.com/RazrFalcon/resvg/issues/544>
-    pub unsafe fn with<F>(&self, f: F)
-    where
-        F: FnOnce(&usvg::Tree),
-    {
-        self.0.tree.with(f)
+    /// The parsed SVG tree.
+    pub fn tree(&self) -> &usvg::Tree {
+        &self.0.tree
     }
 }
 
@@ -129,7 +101,7 @@ impl Hash for Repr {
 /// Discover and load the fonts referenced by an SVG.
 fn load_svg_fonts(
     world: Tracked<dyn World + '_>,
-    tree: &mut usvg::Tree,
+    tree: &usvg::Tree,
     families: &[String],
 ) -> (fontdb::Database, u128) {
     let book = world.book();
@@ -143,6 +115,10 @@ fn load_svg_fonts(
             .entry(id)
             .or_insert_with(|| {
                 let font = world.font(id)?;
+                println!(
+                    "Providing {}",
+                    font.find_name(ttf_parser::name_id::FAMILY).unwrap()
+                );
                 fontdb.load_font_source(fontdb::Source::Binary(Arc::new(
                     font.data().clone(),
                 )));
@@ -154,24 +130,34 @@ fn load_svg_fonts(
     };
 
     // Determine the best font for each text node.
-    for child in &mut tree.root.children {
+    for child in tree.root().children() {
         traverse_svg(child, &mut |node| {
-            let usvg::Node::Text(ref mut text) = node else { return };
-            for chunk in &mut text.chunks {
-                'spans: for span in &mut chunk.spans {
-                    let Some(text) = chunk.text.get(span.start..span.end) else {
+            let usvg::Node::Text(text) = node else { return };
+            println!("Text: {text:#?}");
+            for chunk in text.chunks() {
+                'spans: for span in chunk.spans() {
+                    let Some(text) = chunk.text().get(span.start()..span.end()) else {
                         continue;
                     };
                     let variant = FontVariant {
-                        style: span.font.style.into(),
-                        weight: FontWeight::from_number(span.font.weight),
-                        stretch: span.font.stretch.into(),
+                        style: span.font().style().into(),
+                        weight: FontWeight::from_number(span.font().weight()),
+                        stretch: span.font().stretch().into(),
                     };
 
                     // Find a font that covers the whole text among the span's fonts
                     // and the current document font families.
                     let mut like = None;
-                    for family in span.font.families.iter().chain(families) {
+                    for family in span
+                        .font()
+                        .families()
+                        .iter()
+                        .filter_map(|family| match family {
+                            usvg::FontFamily::Named(named) => Some(named),
+                            _ => None,
+                        })
+                        .chain(families)
+                    {
                         let Some(id) = book.select(&family.to_lowercase(), variant)
                         else {
                             continue;
@@ -180,8 +166,7 @@ fn load_svg_fonts(
                         like.get_or_insert(info);
 
                         if text.chars().all(|c| info.coverage.contains(c as u32)) {
-                            if let Some(usvg_family) = load_into_db(id) {
-                                span.font.families = vec![usvg_family];
+                            if let Some(_) = load_into_db(id) {
                                 continue 'spans;
                             }
                         }
@@ -189,9 +174,7 @@ fn load_svg_fonts(
 
                     // If we didn't find a match, select a fallback font.
                     if let Some(id) = book.select_fallback(like, variant, text) {
-                        if let Some(usvg_family) = load_into_db(id) {
-                            span.font.families = vec![usvg_family];
-                        }
+                        load_into_db(id);
                     }
                 }
             }
@@ -202,20 +185,20 @@ fn load_svg_fonts(
 }
 
 /// Search for all font families referenced by an SVG.
-fn traverse_svg<F>(node: &mut usvg::Node, f: &mut F)
+fn traverse_svg<F>(node: &usvg::Node, f: &mut F)
 where
-    F: FnMut(&mut usvg::Node),
+    F: FnMut(&usvg::Node),
 {
     f(node);
 
-    node.subroots_mut(|subroot| {
-        for child in &mut subroot.children {
+    node.subroots(|subroot| {
+        for child in subroot.children() {
             traverse_svg(child, f);
         }
     });
 
-    if let Node::Group(ref mut group) = node {
-        for child in &mut group.children {
+    if let Node::Group(group) = node {
+        for child in group.children() {
             traverse_svg(child, f);
         }
     }
@@ -223,7 +206,7 @@ where
 
 /// The ceiled pixel size of an SVG.
 fn tree_size(tree: &usvg::Tree) -> Axes<f64> {
-    Axes::new(tree.size.width() as f64, tree.size.height() as f64)
+    Axes::new(tree.size().width() as f64, tree.size().height() as f64)
 }
 
 /// Format the user-facing SVG decoding error message.
@@ -237,42 +220,4 @@ fn format_usvg_error(error: usvg::Error) -> EcoString {
         }
         usvg::Error::ParsingFailed(error) => format_xml_like_error("SVG", error),
     }
-}
-
-mod sync {
-    use std::sync::Mutex;
-
-    /// A synchronized wrapper around a `usvg::Tree`.
-    pub struct SyncTree(Mutex<usvg::Tree>);
-
-    impl SyncTree {
-        /// Create a new synchronized tree.
-        ///
-        /// # Safety
-        /// The tree must be completely owned by `tree`, there may not be any
-        /// other references to `Rc`s contained in it.
-        pub unsafe fn new(tree: usvg::Tree) -> Self {
-            Self(Mutex::new(tree))
-        }
-
-        /// Perform an operation with the usvg tree.
-        ///
-        /// # Safety
-        /// The caller may not hold any references to `Rc`s contained in
-        /// the usvg Tree after returning.
-        pub unsafe fn with<F>(&self, f: F)
-        where
-            F: FnOnce(&usvg::Tree),
-        {
-            let tree = self.0.lock().unwrap();
-            f(&tree)
-        }
-    }
-
-    // Safety: usvg's Tree is only non-Sync and non-Send because it uses `Rc`
-    // internally. By wrapping it in a mutex and forbidding outstanding
-    // references to the tree to remain after a `with` call, we guarantee that
-    // no two threads try to change a ref-count at the same time.
-    unsafe impl Sync for SyncTree {}
-    unsafe impl Send for SyncTree {}
 }

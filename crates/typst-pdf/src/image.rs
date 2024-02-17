@@ -149,20 +149,12 @@ fn encode_alpha(raster: &RasterImage) -> (Vec<u8>, Filter) {
 /// The main XObject will have ID 1.
 fn encode_svg(svg: &SvgImage) -> Chunk {
     let mut chunk = Chunk::new();
-
-    // Safety: We do not keep any references to tree nodes beyond the
-    // scope of `with`.
-    unsafe {
-        svg.with(|tree| {
-            svg2pdf::convert_tree_into(
-                tree,
-                svg2pdf::Options::default(),
-                &mut chunk,
-                Ref::new(1),
-            );
-        });
-    }
-
+    svg2pdf::convert_tree_into(
+        svg.tree(),
+        svg2pdf::Options::default(),
+        &mut chunk,
+        Ref::new(1),
+    );
     chunk
 }
 
