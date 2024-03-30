@@ -842,6 +842,7 @@ impl<'a> Generator<'a> {
         for info in &self.infos {
             for subinfo in &info.subinfos {
                 let key = subinfo.key.as_str();
+                println!("@{}", &key);
                 first_occurrences.entry(key).or_insert(info.location);
             }
         }
